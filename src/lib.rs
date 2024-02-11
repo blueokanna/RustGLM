@@ -55,14 +55,14 @@ impl RustGLM {
         }
     }
 
-    async fn rust_chat_glm(&mut self) -> String {
+    pub async fn rust_chat_glm(&mut self) -> String {
         let mut api_key = api_operation::APIKeys::load_api_key();
         let mut require_calling = "SSE".to_string();
         let mut ai_message = String::new();
         let mut input = String::new();
 
         if api_key.is_none() {
-            print!("Enter your API Key:");
+            println!("Enter your API Key:");
             if let Ok(_) = io::stdin().read_line(&mut input) {
                 api_key = Some(input.trim().to_string());
                 api_operation::APIKeys::save_api_key(api_key.as_ref().unwrap());
@@ -128,5 +128,8 @@ impl RustGLM {
         }
 
         String::new()
+    }
+    pub fn get_ai_response(&self) -> String {
+        self.chatglm_response.clone()
     }
 }
