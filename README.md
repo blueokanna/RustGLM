@@ -127,20 +127,20 @@ pub fn load_history_from_file(&self) -> String {
 | 3 | Synchronous | SYNC, Sync, sync |
 
 
-**The example for adding main function to your project:**
+**The example for adding main function to your own project:**
 ```
 //Default is SSE calling method
 
 #[tokio::main]
 async fn main() {
-    let mut rust_glm = RustGLM::new().await;
+    let mut rust_glm = RustGLM::RustGLM::new().await;
     loop {
         println!("You:");
         let ai_response = rust_glm.rust_chat_glm().await;
         if ai_response.is_empty() {
             break;
         }
-        println!("Liliya: {}", rust_glm.chatglm_response);
+        println!("Liliya: {}", rust_glm.get_ai_response());
         println!();
     }
 }
