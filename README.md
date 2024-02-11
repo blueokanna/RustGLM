@@ -126,76 +126,22 @@ pub fn load_history_from_file(&self) -> String {
 | 2 | Asynchronous | ASYNC, Async, async |
 | 3 | Synchronous | SYNC, Sync, sync |
 
----
-**Main Method:**
+
+**The example for adding main function to your project:**
 ```
+//Default is SSE calling method
+
 #[tokio::main]
-pub async fn main() {
-    let mut api_key = api_operation::APIKeys::load_api_key();
-    let mut input = String::new();
-    let mut require_calling = "SSE".to_string();
-    let mut ai_message = String::new();
-
-    if api_key.is_none() {
-        println!("Enter your API Key:");
-        if let Ok(_) = io::stdin().read_line(&mut input) {
-            api_key = Some(input.trim().to_string());
-            api_operation::APIKeys::save_api_key(api_key.as_ref().unwrap());
-        } else {
-            eprintln!("Unable to read user input");
-            return;
+async fn main() {
+    let mut rust_glm = RustGLM::new().await;
+    loop {
+        println!("You:");
+        let ai_response = rust_glm.rust_chat_glm().await;
+        if ai_response.is_empty() {
+            break;
         }
-    }
-
-    if let Some(api_key) = api_key {
-        let api_key_instance = api_operation::APIKeys::get_instance(&*api_key);
-        let jwt_creator = custom_jwt::CustomJwt::new(api_key_instance.get_user_id(), api_key_instance.get_user_secret());
-        let jwt = jwt_creator.create_jwt();
-
-        let jwt_to_verify = jwt.clone();
-        let is_valid = jwt_creator.verify_jwt(&jwt_to_verify);
-
-        if is_valid {
-            loop {
-                println!("Eenter the conversation:");
-                let mut user_input = String::new();
-                io::stdin().read_line(&mut user_input).expect("Failed to read input");
-
-                match user_input.trim().to_lowercase().as_str() {
-                    "sse" => {
-                        require_calling = "SSE".to_string();
-                        println!("Calling method is SSE");
-                        continue;
-                    }
-                    "async" => {
-                        require_calling = "ASYNC".to_string();
-                        println!("Calling method is Async");
-                        continue;
-                    }
-                    "sync" => {
-                        require_calling = "SYNC".to_string();
-                        println!("Calling method is Sync");
-                        continue;
-                    }
-                    _ => {}
-                }
-
-                if require_calling == "SSE" || require_calling == "sse" {
-                    ai_message = sse_invoke_calling(&jwt, &user_input.trim()).await;
-                } else if require_calling == "async" || require_calling == "ASYNC" || require_calling == "Async" {
-                    ai_message = async_invoke_calling(&jwt, &user_input.trim()).await;
-                } else if require_calling == "sync" || require_calling == "SYNC" || require_calling == "Sync" {
-                    ai_message = sync_invoke_calling(&jwt, &user_input.trim()).await;
-                }
-
-                println!("Liliya: {}", ai_message);
-                println!("\nYou: ");
-            }
-        } else {
-            println!("JWT is NOT valid");
-        }
-    } else {
-        println!("API Key not found or an error occurred while loading.");
+        println!("Liliya: {}", rust_glm.chatglm_response);
+        println!();
     }
 }
 ```
