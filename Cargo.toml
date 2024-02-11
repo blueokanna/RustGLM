@@ -9,6 +9,8 @@ description = "High-performance, Reliable ChatGLM SDK natural language processin
 homepage = "https://github.com/blueokanna/RustGLM"
 readme = "README.md"
 keywords = ["chatglm","sdk"]
+crate-type = ["lib"]
+
 
 [badges]
 maintenance = { status = "actively-developed" }
