@@ -2,7 +2,16 @@
 name = "RustGLM"
 version = "0.1.0"
 edition = "2021"
+authors = ["blueokanna <blueokanna@gmail.com>"]
+repository = "https://github.com/blueokanna/RustGLM.git"
+license = "Apache-2.0"
+description = "High-performance, Reliable ChatGLM SDK natural language processing in Rust-Lang"
+homepage = "https://github.com/blueokanna/RustGLM"
+readme = "README.md"
+keywords = ["chatglm","sdk"]
 
+[badges]
+maintenance = { status = "actively-developed" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
