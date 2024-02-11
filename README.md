@@ -118,6 +118,8 @@ pub fn load_history_from_file(&self) -> String {
 
 🚩**Enter the keywords: If there are no other characters, it will switch the Calling mode**
 
+> Type the following keywords to switch the Calling mode:
+
 | Number | Full-Name | KeyWords |
 | :-------------: | :-------------: | :----- |
 | 1 | Server-Sent Events| SSE, sse |
