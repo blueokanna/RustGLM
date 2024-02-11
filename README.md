@@ -13,7 +13,10 @@
 
 > if you are `Linux` user or `MacOS` user, please check here: [Installation-User-Manual](https://forge.rust-lang.org/infra/other-installation-methods.html)
 
-After installation please use `Command Line`  to Check Rust Version:
+<br>
+<br>
+
+1️⃣ After installation please use `Command Line`  to Check Rust Version:
 
 ```
 cargo -V
@@ -22,7 +25,21 @@ or
 ```
 cargo --version
 ```
+<br>
+<br>
 
+2️⃣ **Then you can use command to add library to your own project:**
+```
+cargo add RustGLM
+```
+or use
+```
+RustGLM = "0.1.1"
+```
+
+#### Other RustGLM Documation You may Need: 👉 :link: [RustGLM Documation](https://docs.rs/RustGLM/0.1.1/RustGLM/struct.RustGLM.html)
+<br>
+<br>
 
 ### 1.2 NTP Time Server for Rust
 
@@ -107,8 +124,8 @@ pub fn load_history_from_file(&self) -> String {
     }
 ```
 
-
-----
+<br>
+<br>
 
 ## 2. Easy-to-use SDK
 
