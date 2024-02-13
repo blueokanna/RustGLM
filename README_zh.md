@@ -60,7 +60,7 @@ pub fn time_sync() -> i64 {
 
 ### 1.3 保存 API 密钥
 
-Saving Api key and store it in local file which call `chatglm_api_key` txt file:
+保存 api 密钥并将其存储到本地文件中，该文件称为 `chatglm_api_key.txt` 文件：
 
 ```
 const API_KEY_FILE: &str = "chatglm_api_key.txt";
@@ -76,8 +76,8 @@ const API_KEY_FILE: &str = "chatglm_api_key.txt";
         }
     }
 ```
-**加载 API 密钥:**
 
+**加载 API 密钥:**
 ```
 pub fn load_api_key() -> Option<String> {
         match File::open(API_KEY_FILE) {
@@ -92,7 +92,7 @@ pub fn load_api_key() -> Option<String> {
 
 ### 1.4 保存历史聊天记录
 
-保存用户聊天内容和人工智能的历史聊天记录在 `chatglm_history.txt`.
+保存用户聊天内容和人工智能的历史聊天记录在 `chatglm_history.json` 文件.
 
 ```
 const HISTORY_FILE: &str = "chatglm_history.json";
@@ -162,7 +162,7 @@ async fn main() {
 ```
 
 
-> 总体下来，这个项目引入的三种请求方式应该还是比较简单的，目前的**BUG**会尽量修复🥳，也希望各位开发者对这个项目的支持！再次感谢🎉！
+> 总体下来，这个项目引入的三种请求方式应该还是比较简单的，目前的 **BUG** 会尽量修复🥳，也希望各位开发者对这个项目的支持！再次感谢🎉！
 ---
 
 ## 4.总结

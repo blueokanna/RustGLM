@@ -60,7 +60,7 @@ pub fn time_sync() -> i64 {
 
 ### 1.3 Store API Key
 
-Saving Api key and store it in local file which call `chatglm_api_key` txt file:
+Saving Api key and store it in local file which call `chatglm_api_key.txt` file:
 
 ```
 const API_KEY_FILE: &str = "chatglm_api_key.txt";
@@ -92,7 +92,7 @@ pub fn load_api_key() -> Option<String> {
 
 ### 1.4 Save Chat Content file
 
-User chats and AI replies will be stored in `chatglm_history.txt`.
+User chats and AI replies will be stored in `chatglm_history.json`.
 
 ```
 const HISTORY_FILE: &str = "chatglm_history.json";
@@ -170,4 +170,3 @@ async fn main() {
 ## 4.Conclusion
 >
 > Thank you for opening my project, this is a self-developed RustGLM development project, in order to expand different code language calling for the official SDK requirments. I am also working hard to develop and update this project, of course, I personally will continue to develop this project, I also adhere to the principle of open source more, so that everyone can enjoy my project. Finally, I hope more and more people will participate together 🚀 Thank you for seeing the end! 😆👏
-
