@@ -1,4 +1,4 @@
-# RustGLM for ChatGLM Rust SDK - [中文文档]()
+# RustGLM for ChatGLM Rust SDK - [中文文档](https://github.com/blueokanna/RustGLM/blob/main/README_zh.md)
 > High-performance, high-quality Experience and Reliable ChatGLM SDK natural language processing in Rust-Language
 
 ## 1. Prepare beginning
