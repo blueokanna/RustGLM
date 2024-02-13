@@ -1,9 +1,9 @@
-# RustGLM for ChatGLM Rust SDK - [中文文档]()
-> High-performance, high-quality Experience and Reliable ChatGLM SDK natural language processing in Rust-Language
+# RustGLM for ChatGLM Rust SDK - [English Doc]()
+> 高性能、高品质体验和可靠的 Rust 语言 ChatGLM SDK 自然语言处理功能
 
-## 1. Prepare beginning
+## 1. 准备开始
 
-### 1.1 Install Rust-up excutable programme (👇 Here only display Windows and Android files)
+### 1.1 安装 Rust-up 可删减程序（ 👇 此处仅显示 Windows 和 Android 文件）
 
 [Rust-up-Windows-x64-Installation](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
 
@@ -11,12 +11,12 @@
 
 [Rust-up-aarch64-android-Installation](https://static.rust-lang.org/rustup/dist/aarch64-linux-android/rustup-init)
 
-> if you are `Linux` user or `MacOS` user, please check here: [Installation-User-Manual](https://forge.rust-lang.org/infra/other-installation-methods.html)
+> 如果你是 `Linux` 用户 or `MacOS` 用户, 你可以点击这里进行查看: [用户安装手册](https://forge.rust-lang.org/infra/other-installation-methods.html)
 
 <br>
 <br>
 
-1️⃣ After installation please use `Command Line`  to Check Rust Version:
+1️⃣ 安装后，请使用 `命令行` 检查 Rust 版本：
 
 ```
 cargo -V
@@ -28,7 +28,7 @@ cargo --version
 <br>
 <br>
 
-2️⃣ **Then you can use command to add library to your own project:**
+2️⃣ **然后就可以使用命令将库添加到自己的项目中：**
 ```
 cargo add RustGLM
 ```
@@ -37,13 +37,13 @@ or use
 RustGLM = "0.1.1"
 ```
 
-#### Other RustGLM Documation You may Need: 👉 :link: [RustGLM Documation](https://docs.rs/RustGLM/0.1.1/RustGLM/struct.RustGLM.html)
+#### 您可能需要的其他 RustGLM 文档： 👉 :link: [RustGLM Documation](https://docs.rs/RustGLM/0.1.1/RustGLM/struct.RustGLM.html)
 <br>
 <br>
 
-### 1.2 NTP Time Server for Rust
+### 1.2 Rust NTP 时间服务器
 
-It provides highly accurate and secure time information via time servers on the Internet or LAN, and it is critical to ensure that all devices use the same time. The application here is for `JWT` authentication using：
+它通过互联网或局域网上的时间服务器提供高度准确和安全的时间信息，确保所有设备使用相同的时间至关重要。这里的应用是通过以下方式进行 `JWT` 身份验证：
 
 ```
 pub fn time_sync() -> i64 {
@@ -58,7 +58,7 @@ pub fn time_sync() -> i64 {
 }
 ```
 
-### 1.3 Store API Key
+### 1.3 保存 API 密钥
 
 Saving Api key and store it in local file which call `chatglm_api_key` txt file:
 
@@ -76,7 +76,7 @@ const API_KEY_FILE: &str = "chatglm_api_key.txt";
         }
     }
 ```
-Load ChatGLM API key:
+**加载 API 密钥:**
 
 ```
 pub fn load_api_key() -> Option<String> {
@@ -90,9 +90,9 @@ pub fn load_api_key() -> Option<String> {
     }
 ```
 
-### 1.4 Save Chat Content file
+### 1.4 保存历史聊天记录
 
-User chats and AI replies will be stored in `chatglm_history.txt`.
+保存用户聊天内容和人工智能的历史聊天记录在 `chatglm_history.txt`.
 
 ```
 const HISTORY_FILE: &str = "chatglm_history.json";
@@ -111,7 +111,7 @@ const HISTORY_FILE: &str = "chatglm_history.json";
         json
     }
 ```
-Load History Content from history file:
+**加载聊天记录在:**
 ```
 pub fn load_history_from_file(&self) -> String {
         if let Ok(file) = File::open(&self.history_file_path) {
@@ -127,26 +127,24 @@ pub fn load_history_from_file(&self) -> String {
 <br>
 <br>
 
-## 2. Easy-to-use SDK
+## 2. 易于使用的 SDK
 
-### 2.1 Calling and Using the Rust Crate.io Library
+### 2.1 调用和使用 Rust Crate.io 库
 >
-> Using this rust project **SDK** is less difficult 🤩. The following three examples to let you enter your question and the console will output **ChatGLM** to answer it：
+> 使用这个 **Rust** 项目调用 **SDK** 的难度较低🤩。下面的示例可以让你输入问题以及关键字，控制台会输出 **ChatGLM** 来回答问题：
 
-🚩**Enter the keywords: If there are no other characters, it will switch the Calling mode**
+🚩**输入关键字： 如果没有其他字符，将切换调用模式**
 
-> Type the following keywords to switch the Calling mode:
-
-| Number | Full-Name | KeyWords |
+| 序列号 | 全名 | 关键字 |
 | :-------------: | :-------------: | :----- |
 | 1 | Server-Sent Events| SSE, sse |
 | 2 | Asynchronous | ASYNC, Async, async |
 | 3 | Synchronous | SYNC, Sync, sync |
 
 
-**The example for adding main function to your own project:**
+**为自己的项目添加主函数的示例:**
 ```
-//Default is SSE calling method
+//默认使用流式传输调用
 
 #[tokio::main]
 async fn main() {
@@ -164,10 +162,10 @@ async fn main() {
 ```
 
 
-> Overall down, the introduction of this project three ways to request should still be relatively simple, the current **BUG** will try to fix 🥳, but also hope that all the developer of the support of this project! Thanks again 🎉!
+> 总体下来，这个项目引入的三种请求方式应该还是比较简单的，目前的**BUG**会尽量修复🥳，也希望各位开发者对这个项目的支持！再次感谢🎉！
 ---
 
-## 4.Conclusion
+## 4.总结
 >
-> Thank you for opening my project, this is a self-developed RustGLM development project, in order to expand different code language calling for the official SDK requirments. I am also working hard to develop and update this project, of course, I personally will continue to develop this project, I also adhere to the principle of open source more, so that everyone can enjoy my project. Finally, I hope more and more people will participate together 🚀 Thank you for seeing the end! 😆👏
+> 感谢您打开我的项目，这是一个自主开发的使用 **Rust** 编程语言所开发的项目，目的是针对官方 SDK 的要求扩展不同的代码语言调用。我也在努力开发和更新这个项目，当然，我个人也会继续开发这个项目，我也更坚持开源的原则，让大家都能喜欢我的项目。最后，希望越来越多的人一起参与进来 🚀 感谢您看到最后！ 😆👏
 

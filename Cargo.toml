@@ -5,10 +5,10 @@ edition = "2021"
 authors = ["blueokanna <blueokanna@gmail.com>"]
 repository = "https://github.com/blueokanna/RustGLM.git"
 license = "Apache-2.0"
-description = "High-performance, Reliable ChatGLM SDK natural language processing in Rust-Lang"
+description = "High-performance, Reliable ChatGLM SDK natural language processing in Rust Language"
 homepage = "https://github.com/blueokanna/RustGLM"
 readme = "README.md"
-keywords = ["chatglm","sdk"]
+keywords = ["chatglm","sdk","rust","api","ai"]
 
 [badges]
 maintenance = { status = "actively-developed" }
