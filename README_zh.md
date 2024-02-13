@@ -1,4 +1,4 @@
-# RustGLM for ChatGLM Rust SDK - [English Doc]()
+# RustGLM for ChatGLM Rust SDK - [English Doc](https://github.com/blueokanna/RustGLM/blob/main/README.md)
 > 高性能、高品质体验和可靠的 Rust 语言 ChatGLM SDK 自然语言处理功能
 
 ## 1. 准备开始
