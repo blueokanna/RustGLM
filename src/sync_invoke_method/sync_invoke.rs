@@ -1,24 +1,60 @@
 mod history_message;
-mod constant_value;
 
+extern crate toml;
+
+use std::io::prelude::*;
 use std::error::Error;
+use std::fs::File;
 use regex::Regex;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use futures_util::stream::StreamExt;
-use crate::sync_invoke_method::sync_invoke::constant_value::{LANGUAGE_MODEL, SYSTEM_CONTENT, SYSTEM_ROLE, USER_ROLE, TEMP_FLOAT, TOP_P_FLOAT, ASSISTANT_ROLE};
+
+#[derive(Serialize, Deserialize, Debug)]
+struct AiResponse {
+    language_model: Option<String>,
+    system_role: Option<String>,
+    system_content: Option<String>,
+    user_role: Option<String>,
+    assistant_role: Option<String>,
+    max_tokens: Option<f64>,
+    temp_float: Option<f64>,
+    top_p_float: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct AiConfig {
+    ai_config_glm3: Vec<AiResponse>,
+    ai_config_glm4: Vec<AiResponse>,
+}
+
+fn sync_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>> {
+    let mut file = File::open(file_path)?;
+    let mut file_content = String::new();
+    file.read_to_string(&mut file_content)?;
+
+    let config: AiConfig = toml::from_str(&file_content)?;
+
+    let response = match glm {
+        "glm-3" => config.ai_config_glm3,
+        "glm-4" => config.ai_config_glm4,
+        _ => return Err(Box::from("Invalid glm")),
+    };
+
+    // 将 AiResponse 向量转换为 JSON 字符串
+    let json_string = serde_json::to_string(&response)?;
+
+    Ok(json_string)
+}
 
 pub struct MessageProcessor {
     messages: history_message::HistoryMessage,
-    user_role: String,
 }
 
 impl MessageProcessor {
-    pub fn new(user_role: &str) -> Self {
+    pub fn new() -> Self {
         MessageProcessor {
             messages: history_message::HistoryMessage::new(),
-            user_role: user_role.to_string(),
         }
     }
 
@@ -31,7 +67,7 @@ impl MessageProcessor {
         }
     }
 
-    pub fn last_messages(&self, role:&str, messages: &str) -> String {
+    pub fn last_messages(&self, role: &str, messages: &str) -> String {
         let input_message = self.set_input_message().unwrap_or_default();
 
         let mut input: Value = serde_json::from_str(&input_message).unwrap_or_default();
@@ -42,7 +78,7 @@ impl MessageProcessor {
 
         let regex = Regex::new(r",(\s*})").expect("Failed to create regex pattern");
 
-        let user_messages = (input_message.clone() + &texts.clone());
+        let user_messages = input_message.clone() + &texts.clone();
         let result = regex.replace_all(&user_messages, "");
 
         result.to_string()
@@ -53,36 +89,36 @@ impl MessageProcessor {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncInvokeModel {
     get_message: String,
-    ai_response_data : String,
+    ai_response_data: String,
 }
 
 impl SyncInvokeModel {
     pub fn new() -> Self {
         SyncInvokeModel {
             get_message: String::new(),
-            ai_response_data : String::new(),
+            ai_response_data: String::new(),
         }
     }
 
-    pub async fn sync_request(token: String, input: String, default_url: String) -> Result<String, Box<dyn Error>> {
+    pub async fn sync_request(token: String, input: String, user_config: &str, default_url: String) -> Result<String, Box<dyn Error>> {
         let mut sync_invoke_model = Self::new();
-        Self::sync_invoke_request_method(&mut sync_invoke_model, token.clone(), input.clone(), default_url.clone()).await?;
-        let mut response_message = sync_invoke_model.ai_response_data.clone();
+        Self::sync_invoke_request_method(&mut sync_invoke_model, token.clone(), input.clone(), user_config, default_url.clone()).await?;
+        let response_message = sync_invoke_model.ai_response_data.clone();
         let result = sync_invoke_model.process_sync_task_status(&*response_message, &input);
         Ok(result)
     }
 
-    async fn generate_json_request_body(
+    async fn generate_sync_json_request_body(
         language_model: &str,
         system_role: &str,
         system_content: &str,
         user_role: &str,
         user_input: &str,
+        max_token: f64,
         temp_float: f64,
         top_p_float: f64,
     ) -> Result<String, Box<dyn Error>> {
-
-        let message_process = MessageProcessor::new(user_role);
+        let message_process = MessageProcessor::new();
 
         let messages = json!([
         {"role": system_role, "content": system_content},
@@ -93,6 +129,7 @@ impl SyncInvokeModel {
         "model": language_model,
         "messages": messages,
         "stream": false,
+        "max_tokens": max_token,
         "temperature": temp_float,
         "top_p": top_p_float
     });
@@ -107,9 +144,48 @@ impl SyncInvokeModel {
         &mut self,
         token: String,
         user_input: String,
+        user_config: &str,
         default_url: String,
     ) -> Result<String, String> {
-        let json_content = match Self::generate_json_request_body(LANGUAGE_MODEL, SYSTEM_ROLE, SYSTEM_CONTENT.trim(), USER_ROLE, &*user_input, TEMP_FLOAT, TOP_P_FLOAT).await {
+        let json_string = match crate::sync_invoke_method::sync_invoke::sync_read_config(user_config, "glm-4") {
+            Ok(json_string) => json_string,
+            Err(err) => return Err(format!("Error reading config file: {}", err)),
+        };
+
+        let json_value: Value = serde_json::from_str(&json_string)
+            .expect("Failed to parse Toml to JSON");
+
+        let language_model = json_value[0]["language_model"]
+            .as_str().expect("Failed to get language_model").to_string();
+
+        let system_role = json_value[0]["system_role"]
+            .as_str().expect("Failed to get system_role").to_string();
+
+        let system_content = json_value[0]["system_content"]
+            .as_str().expect("Failed to get system_content").to_string().trim().to_string();
+
+        let user_role = json_value[0]["user_role"]
+            .as_str().expect("Failed to get user_role").to_string();
+
+        let max_token = json_value[0]["max_tokens"]
+            .as_f64().expect("Failed to get max_token");
+
+        let temp_float = json_value[0]["temp_float"]
+            .as_f64().expect("Failed to get temp_float");
+
+        let top_p_float = json_value[0]["top_p_float"]
+            .as_f64().expect("Failed to get top_p_float");
+
+        let user_json_content = match Self::generate_sync_json_request_body(
+            &language_model,
+            &system_role,
+            &system_content,
+            &user_role,
+            &user_input,
+            max_token,
+            temp_float,
+            top_p_float,
+        ).await {
             Ok(result) => result.to_string(),
             Err(err) => return Err(err.to_string()),
         };
@@ -119,7 +195,7 @@ impl SyncInvokeModel {
             .header("Accept", "application/json")
             .header("Content-Type", "application/json;charset=UTF-8")
             .header("Authorization", format!("Bearer {}", token))
-            .body(json_content)
+            .body(user_json_content)
             .send()
             .await
             .map_err(|err| format!("HTTP request failure: {}", err))?;
@@ -128,13 +204,16 @@ impl SyncInvokeModel {
             return Err(format!("Server returned an error: {}", request_result.status()));
         }
 
+        //println!("Sync Calling Now!");
+
+
         let response_text = request_result.text().await.map_err(|err| format!("Failed to read response text: {}", err))?;
         self.ai_response_data = response_text.clone();
 
         Ok(response_text)
     }
 
-    fn process_sync_task_status(&mut self, response_data: &str, user_input: &str) -> String{
+    fn process_sync_task_status(&mut self, response_data: &str, user_input: &str) -> String {
         let result = serde_json::from_str::<Value>(response_data)
             .map_err(|e| format!("Error processing response data: {}", e))
             .and_then(|json_response| {
@@ -172,8 +251,8 @@ impl SyncInvokeModel {
                 //self.get_message.(USER_ROLE, );
                 //self.get_message.add_history_to_file(ASSISTANT_ROLE, &self.get_message);
                 let message_process = history_message::HistoryMessage::new();
-                message_process.add_history_to_file(USER_ROLE,user_input);
-                message_process.add_history_to_file(ASSISTANT_ROLE,&*self.get_message);
+                message_process.add_history_to_file("user", user_input);
+                message_process.add_history_to_file("assistant", &*self.get_message);
 
 
                 self.get_message.clone()
@@ -195,8 +274,5 @@ impl SyncInvokeModel {
             emoji.to_string()
         });
         result.to_string()
-    }
-    pub fn get_content_message(&self) -> &str {
-        &self.get_message
     }
 }

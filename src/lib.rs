@@ -3,10 +3,10 @@ mod api_operation;
 mod async_invoke_method;
 mod sync_invoke_method;
 mod sse_invoke_method;
+mod cogview_invoke_method;
+mod glm4v_invoke_method;
 
-use std::error::Error;
 use std::io;
-use tokio::io::AsyncWriteExt;
 
 #[derive(Debug)]
 pub struct RustGLM {
@@ -20,13 +20,14 @@ impl RustGLM {
         }
     }
 
-    async fn async_invoke_calling(jwt_token: &str, user_input: &str) -> String {
+    async fn async_invoke_calling(jwt_token: &str, user_input: &str, user_config: &str) -> String {
         let jwt_token_clone = jwt_token.to_string();
         let user_input_clone = user_input.to_string();
+        let user_config_clone = user_config.to_string();
 
         let handle = tokio::spawn(async move {
             let response =
-                async_invoke_method::ReceiveAsyncInvokeOnlyText::new(&jwt_token_clone, &user_input_clone);
+                async_invoke_method::ReceiveAsyncInvokeOnlyText::new(&jwt_token_clone, &user_input_clone, user_config_clone);
             response
                 .await
                 .get_response()
@@ -37,8 +38,8 @@ impl RustGLM {
         handle.await.expect("Failed to await JoinHandle")
     }
 
-    async fn sync_invoke_calling(jwt_token: &str, user_input: &str) -> String {
-        let sync_call = sync_invoke_method::ReceiveInvokeModelOnlyText::new(jwt_token, user_input);
+    async fn sync_invoke_calling(jwt_token: &str, user_input: &str, user_config: &str) -> String {
+        let sync_call = sync_invoke_method::ReceiveInvokeModelOnlyText::new(jwt_token, user_input, user_config);
 
         match sync_call.await.get_response_message() {
             Some(message) => message.to_string(), // Return the message as String
@@ -46,8 +47,8 @@ impl RustGLM {
         }
     }
 
-    async fn sse_invoke_calling(jwt_token: &str, user_input: &str) -> String {
-        let sse_call = sse_invoke_method::ReceiveSSEInvokeModelOnlyText::new(jwt_token, user_input);
+    async fn sse_invoke_calling(jwt_token: &str, user_input: &str, user_config: &str) -> String {
+        let sse_call = sse_invoke_method::ReceiveSSEInvokeModelOnlyText::new(jwt_token, user_input, user_config);
 
         match sse_call.await.get_response_message() {
             Some(message) => message.to_string(), // Return the message as String
@@ -55,7 +56,25 @@ impl RustGLM {
         }
     }
 
-    pub async fn rust_chat_glm(&mut self) -> String {
+    async fn cogview_invoke_calling(jwt_token: &str, user_input: &str, user_config: &str) -> String {
+        let cogview_sync_call = cogview_invoke_method::ReceiveCogviewInvokeModel::new(jwt_token, user_input, user_config);
+
+        match cogview_sync_call.await.get_cogview_response_message() {
+            Some(message) => message.to_string(),
+            None => "Error: Unable to get CogView response.".to_string(),
+        }
+    }
+
+    async fn glm4v_invoke_calling(jwt_token: &str, user_input: &str, user_config: &str) -> String {
+        let glm4v_sse_call = glm4v_invoke_method::Receive4VInvokeModelwithText::new(jwt_token, user_input, user_config);
+
+        match glm4v_sse_call.await.get_response_glm4v_message() {
+            Some(message) => message.to_string(),
+            None => "Error: Unable to get glm4v response.".to_string(),
+        }
+    }
+
+    pub async fn rust_chat_glm(&mut self, user_config: &str) -> String {
         let mut api_key = api_operation::APIKeys::load_api_key();
         let mut require_calling = "SSE".to_string();
         let mut ai_message = String::new();
@@ -103,6 +122,18 @@ impl RustGLM {
                             println!("Calling method is Sync");
                             continue;
                         }
+                        "cogview" => {
+                            require_calling = "COGVIEW".to_string();
+                            println!("Calling method is CogView");
+                            continue;
+                        }
+
+                        "glm4v" => {
+                            require_calling = "GLM4V".to_string();
+                            println!("Calling method is glm4v");
+                            continue;
+                        }
+
                         "exit" => {
                             break; // Exit the loop if "exit" is entered
                         }
@@ -110,11 +141,15 @@ impl RustGLM {
                     }
 
                     if require_calling == "SSE" || require_calling == "sse" {
-                        ai_message = Self::sse_invoke_calling(&jwt, &user_input.trim()).await;
+                        ai_message = Self::sse_invoke_calling(&jwt, &user_input.trim(), user_config).await;
                     } else if require_calling == "async" || require_calling == "ASYNC" || require_calling == "Async" {
-                        ai_message = Self::async_invoke_calling(&jwt, &user_input.trim()).await;
+                        ai_message = Self::async_invoke_calling(&jwt, &user_input.trim(), user_config).await;
                     } else if require_calling == "sync" || require_calling == "SYNC" || require_calling == "Sync" {
-                        ai_message = Self::sync_invoke_calling(&jwt, &user_input.trim()).await;
+                        ai_message = Self::sync_invoke_calling(&jwt, &user_input.trim(), user_config).await;
+                    } else if require_calling == "cogview" || require_calling == "COGVIEW" || require_calling == "CogView" || require_calling == "Cogview" {
+                        ai_message = Self::cogview_invoke_calling(&jwt, &user_input.trim(), user_config).await;
+                    } else if require_calling == "glm4v" || require_calling == "GLM4V" || require_calling == "GLM4v" || require_calling == "glm4V" {
+                        ai_message = Self::glm4v_invoke_calling(&jwt, &user_input.trim(), user_config).await;
                     }
 
                     self.chatglm_response = ai_message.clone();

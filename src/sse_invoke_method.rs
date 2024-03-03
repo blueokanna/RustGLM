@@ -1,16 +1,13 @@
 mod sse_invoke;
 
-use reqwest;
-use std::error::Error;
-
 #[derive(Debug)]
 pub struct ReceiveSSEInvokeModelOnlyText {
-    response_sse_message:  Option<String>,
+    response_sse_message: Option<String>,
     default_url: String,
 }
 
 impl ReceiveSSEInvokeModelOnlyText {
-    pub async fn new(token: &str, message: &str) -> Self {
+    pub async fn new(token: &str, message: &str, user_config: &str) -> Self {
         let default_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions".trim().to_string();
 
         let mut instance = Self {
@@ -18,13 +15,13 @@ impl ReceiveSSEInvokeModelOnlyText {
             default_url,
         };
 
-        instance.send_request_and_wait(token, message).await;
+        instance.send_request_and_wait(token, message, user_config).await;
         instance
     }
-    pub async fn send_request_and_wait(&mut self, token: &str, message: &str) {
+    pub async fn send_request_and_wait(&mut self, token: &str, message: &str, user_config: &str) {
         let default_url = self.default_url.clone();
 
-        let result = sse_invoke::SSEInvokeModel::sse_request(token.parse().unwrap(), message.parse().unwrap(), default_url);
+        let result = sse_invoke::SSEInvokeModel::sse_request(token.parse().unwrap(), message.parse().unwrap(), user_config, default_url);
 
         match result.await {
             Ok(response) => {
@@ -40,5 +37,4 @@ impl ReceiveSSEInvokeModelOnlyText {
     pub fn get_response_message(&self) -> Option<&str> {
         self.response_sse_message.as_deref()
     }
-
 }
