@@ -200,7 +200,7 @@ top_p_float = 0.9
 
 #[tokio::main]
 async fn main() {
-    let mut rust_glm = RustGLM::new().await;
+    let mut rust_glm = RustGLM::RustGLM::new().await;
     loop {
         println!("You:");
         
