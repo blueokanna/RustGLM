@@ -225,7 +225,7 @@ async fn main() {
         io::stdin().read_line(&mut user_in).expect("Failed to read line");
         rust_glm.set_user_input(user_in.trim().to_string()); // 使用修改后的 RustGLM 实例
 
-        let ai_response = rust_glm.rust_chat_glm("glm-3", "Constants.toml").await; // 调用修改后的 RustGLM 实例的方法
+        let ai_response = rust_glm.rust_chat_glm("glm-4", "Constants.toml").await; // 调用修改后的 RustGLM 实例的方法
         println!("Liliya: {}", ai_response);
 
         if ai_response.is_empty() {
