@@ -255,18 +255,31 @@ async fn main() {
 ## 3. Command Usage
 The request mode here uses the separator: **#**, **:*** is required when using **glm4v** or **cogview3** inside the request mode, and only **Text @ url** is used inside **glm-4v**.
 
-By default the **SSE** request invocation mode is used and you can use the command:
-``Hello`` or ``SSE#Hello``.
+#### 3.1 🚀By default the **SSE** request invocation mode is used and you can use the command:
 
-If you wish to use **Synchronous Request Sync** or **Asynchronous Request Async**, the command can be as follows:
-```sync#Hello`` and ```async#Hello``.
+```
+Hello  or  SSE#Hello
+```
 
-If you want to use a **CogView3** request, as the **CogView3** here uses the command for synchronous requests, then you can just use:
-```sync#cogview3:draw a beautiful cat```
+#### 3.2 🚀If you wish to use **Synchronous Request Sync** or **Asynchronous Request Async**, the command can be as follows:
+```
+sync#Hello
+```
+and 
+```
+async#Hello
+```
 
-If you want to use GLM-4V, then this request is inside **SSE** and the command you need to enter is as follows:
-```sse#glm4v:What's in the picture@https://img1.baidu.com/it/u=1369931113,3388870256&fm=253&app=138&size=w931&n=0&f=JPEG&fmt=auto?sec =1703696400&t=f3028c7a1dca43a080aeb8239f09cc2f ````
+#### 3.3 🚀If you want to use a **CogView3** request, as the **CogView3** here uses the command for synchronous requests, then you can just use:
+```
+sync#cogview3:draw a beautiful cat
+```
 
+#### 3.4 🚀If you want to use **GLM-4V**, then this request is inside **SSE** and the command you need to enter is as follows:
+```
+sse#glm4v:What's in the picture@https://img1.baidu.com/it/u=1369931113,3388870256&fm=253&app=138&size=w931&n=0&f=JPEG&fmt=auto?sec =1703696400&t=f3028c7a1dca43a080aeb8239f09cc2f
+```
+<br>
 <br>
 
 > Overall down, the introduction of this project different ways to satisfy your request should still be relatively simple, the current **BUG** will try to fix 🥳, but also hope that all the developer of the support of this project! Thanks again 🎉!
