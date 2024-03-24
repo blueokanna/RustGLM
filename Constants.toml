@@ -1,3 +1,6 @@
+#Blueokanna Editted
+#Constant Version = 0.1.4
+
 [[ai_cogview_config_3]]
 model = "cogview-3"
 
@@ -27,5 +30,4 @@ user_role = "user"
 model = "glm-4v"
 user_role = "user"
 
-[[chatglm_api_key]]
 

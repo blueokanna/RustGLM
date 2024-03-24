@@ -1,6 +1,10 @@
 # RustGLM: 基于智谱的 ChatGLM Rust SDK - [English Doc](https://github.com/blueokanna/RustGLM/blob/main/README.md)
 > 高性能、高品质体验和可靠的 Rust 语言的智谱 ChatGLM 自然大语言处理开发套件
 
+### ❌ 注意! RustGLM 0.1.0 和 RustGLM 0.1.3 版本不可用! 请更新到最新版本进行使用!
+
+<br>
+
 ## 1. 准备开始
 
 ### 1.1 安装 Rust-up 可删减程序（ 👇 此处仅显示 Windows 和 Android 文件）
@@ -34,7 +38,7 @@ cargo add RustGLM
 ```
 or use
 ```
-RustGLM = "0.1.3"
+RustGLM = "0.1.4"
 ```
 
 #### 您可能需要的其他 RustGLM 文档： 👉 :link: [RustGLM Documation](https://docs.rs/RustGLM/0.1.1/RustGLM/struct.RustGLM.html)
@@ -58,69 +62,7 @@ pub fn time_sync() -> i64 {
 }
 ```
 
-### 1.3 保存 API 密钥
-
-在本地文件中保存 ChatGLM api 密钥：
-
-```
-pub fn save_api_key(user_config: &str, api_key: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let config = if let Ok(contents) = fs::read_to_string(user_config) {
-            toml::from_str::<AiConfig>(&contents)?
-        } else {
-            AiConfig {
-                chatglm_api_key: Vec::new(),
-            }
-        };
-
-        if config.chatglm_api_key.iter().any(|c| c.api_key.as_ref().map(|k| k == api_key).unwrap_or(false)) {
-            println!("API key already exists. Skipping...");
-            return Ok(());
-        }
-
-        ChatApiConfig {
-            api_key: Some(api_key.to_string()),
-        };
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(user_config)?;
-        if let Some(pos) = Self::find_insert_position(&mut file, "[[chatglm_api_key]]")? {
-            file.seek(SeekFrom::Start(pos))?;
-        } else {
-            file.seek(SeekFrom::End(0))?;
-            //writeln!(file, "[[chatglm_api_key]]")?;
-
-        }
-        writeln!(file, "[[chatglm_api_key]]")?;
-        writeln!(file, "api_key = \"{}\"", api_key)?;
-
-        Ok(())
-    }
-```
-
-**加载 API 密钥:**
-```
-pub async fn load_api_key(user_config: &str) -> Result<String, Box<dyn Error>> {
-        let json_string = match chatglm_api_read_config(user_config, "chatglm_api_key").await {
-            Ok(final_json_string) => final_json_string,
-            Err(err) => return Err(format!("Error reading config file: {}", err).into()),
-        };
-
-        let api_key: Value = serde_json::from_str(&json_string)
-            .map_err(|err| format!("Failed to parse JSON: {}", err))?;
-
-        let glm_key = api_key[0]["api_key"]
-            .as_str()
-            .ok_or_else(|| "Failed to get api_key")?
-            .to_string();
-
-        Ok(glm_key)
-    }
-```
-
-### 1.4 保存历史聊天记录
+### 1.3 保存历史聊天记录
 
 保存用户聊天内容和人工智能的历史聊天记录在 `chatglm_history.json` 文件.
 
@@ -187,9 +129,6 @@ system_role = "system"
 temp_float = 0.5
 top_p_float = 0.9
 user_role = "user"
-
-[[chatglm_api_key]]
-
 ```
 
 <br>
@@ -224,8 +163,9 @@ async fn main() {
         let mut user_in = String::new();
         io::stdin().read_line(&mut user_in).expect("Failed to read line");
         rust_glm.set_user_input(user_in.trim().to_string()); // 使用修改后的 RustGLM 实例
+        let api_key: Option<String> = Some("xxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxx".to_string());
 
-        let ai_response = rust_glm.rust_chat_glm("glm-4", "Constants.toml").await; // 调用修改后的 RustGLM 实例的方法
+        let ai_response = rust_glm.rust_chat_glm(api_key,"glm-4","Constants.toml").await; // 调用修改后的 RustGLM 实例的方法
         println!("Liliya: {}", ai_response);
 
         if ai_response.is_empty() {

@@ -1,8 +1,6 @@
 use std::error::Error;
-use std::fs;
-use std::fs::{File, OpenOptions};
 use once_cell::sync::OnceCell;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::BufRead;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -79,59 +77,5 @@ impl APIKeys {
             .to_string();
 
         Ok(glm_key)
-    }
-
-    pub fn save_api_key(user_config: &str, api_key: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let config = if let Ok(contents) = fs::read_to_string(user_config) {
-            toml::from_str::<AiConfig>(&contents)?
-        } else {
-            AiConfig {
-                chatglm_api_key: Vec::new(),
-            }
-        };
-
-        if config.chatglm_api_key.iter().any(|c| c.api_key.as_ref().map(|k| k == api_key).unwrap_or(false)) {
-            println!("API key already exists. Skipping...");
-            return Ok(());
-        }
-
-        ChatApiConfig {
-            api_key: Some(api_key.to_string()),
-        };
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(user_config)?;
-        if let Some(pos) = Self::find_insert_position(&mut file, "[[chatglm_api_key]]")? {
-            file.seek(SeekFrom::Start(pos))?;
-        } else {
-            file.seek(SeekFrom::End(0))?;
-            //writeln!(file, "[[chatglm_api_key]]")?;
-
-        }
-        writeln!(file, "[[chatglm_api_key]]")?;
-        writeln!(file, "api_key = \"{}\"", api_key)?;
-
-        Ok(())
-    }
-
-    fn find_insert_position(file: &mut File, target: &str) -> Result<Option<u64>, Box<dyn Error>> {
-        let reader = BufReader::new(file);
-        let mut pos = 0;
-        let mut found_target = false;
-        for line in reader.lines() {
-            let line = line?;
-            if line.starts_with(target) {
-                found_target = true;
-                continue; // Continue searching for the next line after the target
-            }
-            if found_target {
-                return Ok(Some(pos));
-            }
-            pos += line.len() as u64 + 1; // Add 1 for the newline character
-        }
-        Ok(None)
     }
 }

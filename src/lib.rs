@@ -96,10 +96,6 @@ impl RustGLM {
         user_config: Arc<String>,
         jwt: Arc<String>,
     ) -> CallResult {
-        if part1_content.trim().to_lowercase() == "apikey" {
-            return CallResult::Success("No API key needed for NextRound".to_string());
-        }
-
         let mut methods: HashMap<&str, Box<dyn Fn() -> BoxFuture<'static, String> + Send>> =
             HashMap::new();
         let jwt_for_sse = Arc::clone(&jwt);
@@ -172,7 +168,7 @@ impl RustGLM {
     }
 
 
-    pub async fn rust_chat_glm(&mut self, glm_version: &str, user_config: &str) -> String {
+    pub async fn rust_chat_glm(&mut self, api_key:Option<String>, glm_version: &str, user_config: &str) -> String {
         let user_in = &self.chatglm_input;
         let (mut part1_content, mut part2_content) = ("SSE".to_string(), String::new());
 
@@ -186,21 +182,6 @@ impl RustGLM {
             CallResult::Error("Input does not match the pattern".to_string());
             return String::new();
         }
-
-        if part1_content == "apikey" {
-            if let Err(..) = api_operation::APIKeys::save_api_key(user_config, &part2_content) {
-                CallResult::Error("Error saving api Key".to_string());
-                return String::new();
-            }
-        }
-
-        let api_key = match api_operation::APIKeys::load_api_key(user_config).await {
-            Ok(api_key) => Some(api_key),
-            Err(..) => {
-                CallResult::Error("Error Code: 1200, Error loading api Key".to_string());
-                None
-            }
-        };
 
         if let Some(api_key) = api_key {
             let api_key_instance = api_operation::APIKeys::get_instance(&api_key);
@@ -232,4 +213,3 @@ impl RustGLM {
         self.chatglm_response.clone()
     }
 }
-

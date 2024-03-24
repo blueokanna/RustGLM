@@ -2,6 +2,10 @@
 
 > High-performance, high-quality Experience and Reliable Zhipu ChatGLM SDK natural language processing in Rust-Language
 
+### ❌ Caution! RustGLM 0.1.0 and 0.1.3 Version was yanked! Please Update latest version!
+
+<br>
+
 ## 1. Prepare beginning
 
 ### 1.1 Install Rust-up excutable programme (👇 Here only display Windows and Android files)
@@ -42,7 +46,7 @@ cargo add RustGLM
 or use
 
 ```
-RustGLM = "0.1.3"
+RustGLM = "0.1.4"
 ```
 
 #### Other RustGLM Documation You may Need: 👉 :link: [RustGLM Documation](https://docs.rs/RustGLM/0.1.1/RustGLM/struct.RustGLM.html)
@@ -68,70 +72,7 @@ pub fn time_sync() -> i64 {
 }
 ```
 
-### 1.3 Store API Key
-
-Saving ChatGLM api key in local Constants file:
-
-```
-pub fn save_api_key(user_config: &str, api_key: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let config = if let Ok(contents) = fs::read_to_string(user_config) {
-            toml::from_str::<AiConfig>(&contents)?
-        } else {
-            AiConfig {
-                chatglm_api_key: Vec::new(),
-            }
-        };
-
-        if config.chatglm_api_key.iter().any(|c| c.api_key.as_ref().map(|k| k == api_key).unwrap_or(false)) {
-            println!("API key already exists. Skipping...");
-            return Ok(());
-        }
-
-        ChatApiConfig {
-            api_key: Some(api_key.to_string()),
-        };
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(user_config)?;
-        if let Some(pos) = Self::find_insert_position(&mut file, "[[chatglm_api_key]]")? {
-            file.seek(SeekFrom::Start(pos))?;
-        } else {
-            file.seek(SeekFrom::End(0))?;
-            //writeln!(file, "[[chatglm_api_key]]")?;
-
-        }
-        writeln!(file, "[[chatglm_api_key]]")?;
-        writeln!(file, "api_key = \"{}\"", api_key)?;
-
-        Ok(())
-    }
-```
-
-Load ChatGLM API key:
-
-```
-pub async fn load_api_key(user_config: &str) -> Result<String, Box<dyn Error>> {
-        let json_string = match chatglm_api_read_config(user_config, "chatglm_api_key").await {
-            Ok(final_json_string) => final_json_string,
-            Err(err) => return Err(format!("Error reading config file: {}", err).into()),
-        };
-
-        let api_key: Value = serde_json::from_str(&json_string)
-            .map_err(|err| format!("Failed to parse JSON: {}", err))?;
-
-        let glm_key = api_key[0]["api_key"]
-            .as_str()
-            .ok_or_else(|| "Failed to get api_key")?
-            .to_string();
-
-        Ok(glm_key)
-    }
-```
-
-### 1.4 Save Chat Content file
+### 1.3 Save Chat Content file
 
 User chats and AI replies will be stored in `chatglm_history.json`.
 
@@ -199,9 +140,6 @@ system_role = "system"
 temp_float = 0.5
 top_p_float = 0.9
 user_role = "user"
-
-[[chatglm_api_key]]
-
 ```
 
 <br>
@@ -240,8 +178,9 @@ async fn main() {
         let mut user_in = String::new();
         io::stdin().read_line(&mut user_in).expect("Failed to read line");
         rust_glm.set_user_input(user_in.trim().to_string()); // Using a modified RustGLM instance
+        let api_key: Option<String> = Some("xxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxxx".to_string());
 
-        let ai_response = rust_glm.rust_chat_glm("glm-4", "Constants.toml").await; // Methods to call modified RustGLM instances
+        let ai_response = rust_glm.rust_chat_glm(api_key,"glm-4","Constants.toml").await; // Methods to call modified RustGLM instances
         println!("Liliya: {}", ai_response);
 
         if ai_response.is_empty() {
@@ -279,6 +218,7 @@ sync#cogview3:draw a beautiful cat
 ```
 sse#glm4v:What's in the picture@https://img1.baidu.com/it/u=1369931113,3388870256&fm=253&app=138&size=w931&n=0&f=JPEG&fmt=auto?sec =1703696400&t=f3028c7a1dca43a080aeb8239f09cc2f
 ```
+
 <br>
 <br>
 
