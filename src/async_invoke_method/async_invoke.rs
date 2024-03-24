@@ -47,6 +47,7 @@ async fn async_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn
 pub struct MessageProcessor {
     messages: history_message::HistoryMessage,
 }
+
 impl MessageProcessor {
     pub fn new() -> Self {
         MessageProcessor {
@@ -96,9 +97,9 @@ impl AsyncInvokeModel {
         }
     }
 
-    pub async fn async_request(token: String, input: String, user_config: String, default_url: String, check_url: String) -> Result<String, Box<dyn Error>> {
+    pub async fn async_request(token: String, input: String, glm_version:&str,user_config: String, default_url: String, check_url: String) -> Result<String, Box<dyn Error>> {
         let mut async_invoke_model = Self::new();
-        Self::async_invoke_request_method(&mut async_invoke_model, token.clone(), input.clone(), user_config.clone(), default_url.clone()).await?;
+        Self::async_invoke_request_method(&mut async_invoke_model, token.clone(), input.clone(), glm_version,user_config.clone(), default_url.clone()).await?;
         let search_id = async_invoke_model.search_task_id.clone();
         let response_data = Self::wait_for_task_to_complete(&*search_id.clone(), &*token.clone(), &*check_url.clone()).await?;
         let result = async_invoke_model.process_task_status(&response_data, &input);
@@ -154,10 +155,11 @@ impl AsyncInvokeModel {
         &mut self,
         token: String,
         user_input: String,
+        glm_version: &str,
         user_config: String,
         default_url: String,
     ) -> Result<String, String> {
-        let json_string = match async_read_config(user_config.as_str(), "glm-4").await {
+        let json_string = match async_read_config(user_config.as_str(), glm_version).await {
             Ok(json_string) => json_string,
             Err(err) => return Err(format!("Error reading config file: {}", err)),
         };

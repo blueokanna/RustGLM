@@ -7,7 +7,7 @@ pub struct ReceiveSSEInvokeModelOnlyText {
 }
 
 impl ReceiveSSEInvokeModelOnlyText {
-    pub async fn new(token: &str, message: &str, user_config: &str) -> Self {
+    pub async fn new(token: &str, message: &str, glm_version: &str, user_config: &str) -> Self {
         let default_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions".trim().to_string();
 
         let mut instance = Self {
@@ -15,13 +15,13 @@ impl ReceiveSSEInvokeModelOnlyText {
             default_url,
         };
 
-        instance.send_request_and_wait(token, message, user_config).await;
+        instance.send_request_and_wait(token, message, glm_version, user_config).await;
         instance
     }
-    pub async fn send_request_and_wait(&mut self, token: &str, message: &str, user_config: &str) {
+    pub async fn send_request_and_wait(&mut self, token: &str, message: &str, glm_version: &str, user_config: &str) {
         let default_url = self.default_url.clone();
 
-        let result = sse_invoke::SSEInvokeModel::sse_request(token.parse().unwrap(), message.parse().unwrap(), user_config, default_url);
+        let result = sse_invoke::SSEInvokeModel::sse_request(token.parse().unwrap(), message.parse().unwrap(), glm_version, user_config, default_url);
 
         match result.await {
             Ok(response) => {
