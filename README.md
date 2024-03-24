@@ -4,7 +4,7 @@
 
 <br>
 
-### ❌ Caution! RustGLM 0.1.0 and 0.1.3 Version was yanked! Please Update latest version!
+### ❌ Caution! RustGLM 0.1.0 Version was yanked! Please Update latest version!
 
 <br>
 
@@ -142,6 +142,10 @@ system_role = "system"
 temp_float = 0.5
 top_p_float = 0.9
 user_role = "user"
+
+#if you use RustGLM 0.1.3 you can add **chatglm_api_key** part below; otherwise please do not add it:
+[[chatglm_api_key]]
+api_key = "xxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxx"
 ```
 
 <br>
@@ -168,8 +172,39 @@ user_role = "user"
 **The example for adding main function to your own project:**
 > Here we introduce a configuration file. The default is **Constants.toml** configuration file
 
+
+Rust Main Function for RustGLM v0.1.3:
+
 ```
-//Default is SSE calling method
+//Default is SSE calling method in RustGLM v0.1.3
+
+
+#[tokio::main]
+async fn main() {
+    let mut rust_glm = RustGLM::RustGLM::new().await;
+    loop {
+        println!("You:");
+        let mut user_in = String::new();
+        io::stdin().read_line(&mut user_in).expect("Failed to read line");
+        rust_glm.set_user_input(user_in.trim().to_string()); // Using a modified RustGLM instance
+        
+        let ai_response = rust_glm.rust_chat_glm("glm-4","Constants.toml").await; // Methods to call modified RustGLM instances
+        println!("Liliya: {}", ai_response);
+
+        if ai_response.is_empty() {
+            break;
+        }
+        println!();
+    }
+}
+```
+
+<br>
+
+Rust Main Function for RustGLM v0.1.4:
+
+```
+//Default is SSE calling method in RustGLM v0.1.4
 
 
 #[tokio::main]
