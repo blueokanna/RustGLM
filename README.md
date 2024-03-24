@@ -109,7 +109,7 @@ pub fn load_history_from_file(&self) -> String {
     }
 ```
 
-### 1.5 Import ChatGLM TOML Configuration file (default)
+### 1.4 Manual import ChatGLM TOML Configuration file to your project:
 
 ```
 [[cogview_config_3]]
@@ -143,7 +143,7 @@ temp_float = 0.5
 top_p_float = 0.9
 user_role = "user"
 
-#if you use RustGLM 0.1.3 you can add **chatglm_api_key** part below; otherwise please do not add it:
+#if you use RustGLM 0.1.3 you can add this  (chatglm_api_key) part below; otherwise please do not add it to your project:
 [[chatglm_api_key]]
 api_key = "xxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxx"
 ```
@@ -173,7 +173,7 @@ api_key = "xxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxx"
 > Here we introduce a configuration file. The default is **Constants.toml** configuration file
 
 
-Rust Main Function for RustGLM v0.1.3:
+RustGLM v0.1.3:
 
 ```
 //Default is SSE calling method in RustGLM v0.1.3
@@ -201,7 +201,7 @@ async fn main() {
 
 <br>
 
-Rust Main Function for RustGLM v0.1.4:
+RustGLM v0.1.4:
 
 ```
 //Default is SSE calling method in RustGLM v0.1.4
