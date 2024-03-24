@@ -1,6 +1,8 @@
 # RustGLM: 基于智谱的 ChatGLM Rust SDK - [English Doc](https://github.com/blueokanna/RustGLM/blob/main/README.md)
 > 高性能、高品质体验和可靠的 Rust 语言的智谱 ChatGLM 自然大语言处理开发套件
 
+<br>
+
 ### ❌ 注意! RustGLM 0.1.0 和 RustGLM 0.1.3 版本不可用! 请更新到最新版本进行使用!
 
 <br>
