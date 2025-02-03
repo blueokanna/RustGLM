@@ -2,22 +2,22 @@ mod history_message;
 
 extern crate toml;
 
-use std::fs::File;
-use std::collections::VecDeque;
-use std::error::Error;
-use std::io::Read;
+use futures::stream::StreamExt;
 use regex::Regex;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use futures::stream::StreamExt;
+use std::collections::VecDeque;
+use std::error::Error;
+use std::fs::File;
+use std::io::Read;
 
 lazy_static::lazy_static! {
-    static ref UNICODE_REGEX: regex::Regex = regex::Regex::new(r"\\u[0-9a-fA-F]{4}").unwrap();
+    static ref UNICODE_REGEX: Regex = Regex::new(r"\\u[0-9a-fA-F]{4}").unwrap();
 }
 
 /*
-ChatGLM-3, ChatGLM-4 Config
+ChatGLM-4-Plus, ChatGLM-4-Air, ChatGLM-4-Flash Config
 */
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -27,15 +27,16 @@ struct AiResponse {
     system_content: Option<String>,
     user_role: Option<String>,
     assistant_role: Option<String>,
-    max_tokens: Option<f64>,
     temp_float: Option<f64>,
     top_p_float: Option<f64>,
+    glm_type: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SSEConfig {
-    ai_config_glm3: Vec<AiResponse>,
-    ai_config_glm4: Vec<AiResponse>,
+    ai_config_glm4_plus: Vec<AiResponse>,
+    ai_config_glm4_air: Vec<AiResponse>,
+    ai_config_glm4_flash: Vec<AiResponse>,
 }
 
 fn sse_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>> {
@@ -46,14 +47,14 @@ fn sse_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>>
     let config: SSEConfig = toml::from_str(&file_content)?;
 
     let response = match glm {
-        "glm-3" => &config.ai_config_glm3,
-        "glm-4" => &config.ai_config_glm4,
+        "glm-4-plus" => &config.ai_config_glm4_plus,
+        "glm-4-air" => &config.ai_config_glm4_air,
+        "glm-4-flash" => &config.ai_config_glm4_flash,
         _ => return Err("Invalid glm-format".into()),
     };
 
     serde_json::to_string(response).map_err(Into::into)
 }
-
 
 /*
 ChatGLM-4V Config
@@ -67,6 +68,8 @@ struct Glm4vConfig {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct GLM4VConfig {
+    ai_config_glm4v_plus: Vec<Glm4vConfig>,
+    ai_config_glm4v_flash: Vec<Glm4vConfig>,
     ai_config_glm4v: Vec<Glm4vConfig>,
 }
 
@@ -75,6 +78,8 @@ async fn glm4v_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn
     let config: GLM4VConfig = toml::from_str(&file_content)?;
 
     let response = match glm {
+        "glm-4v-plus" => config.ai_config_glm4v_plus,
+        "glm-4v-flash" => config.ai_config_glm4v_flash,
         "glm-4v" => config.ai_config_glm4v,
         _ => return Err("Invalid glm4v".into()),
     };
@@ -84,11 +89,9 @@ async fn glm4v_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn
     Ok(json_string)
 }
 
-
 /*
 Create chatglm-4v message format by Regex
 */
-
 
 #[derive(Serialize, Deserialize)]
 struct ImageUrl {
@@ -187,7 +190,6 @@ impl MessageProcessor {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SSEInvokeModel {
     get_message: String,
@@ -202,14 +204,27 @@ impl SSEInvokeModel {
         }
     }
 
-    pub async fn sse_request(token: String, input: String, glm_version: &str, user_config: &str, default_url: String) -> Result<String, Box<dyn Error>> {
+    pub async fn sse_request(
+        token: String,
+        input: String,
+        glm_version: &str,
+        user_config: &str,
+        default_url: String,
+    ) -> Result<String, Box<dyn Error>> {
         let mut sse_invoke_model = Self::new();
-        Self::sse_invoke_request_method(&mut sse_invoke_model, token.clone(), input.clone(), glm_version, user_config, default_url.clone()).await?;
+        Self::sse_invoke_request_method(
+            &mut sse_invoke_model,
+            token.clone(),
+            input.clone(),
+            glm_version,
+            user_config,
+            default_url.clone(),
+        )
+        .await?;
         let response_message = sse_invoke_model.ai_response_data.clone();
         let result = sse_invoke_model.process_sse_message(&*response_message, &input);
         Ok(result)
     }
-
 
     /*
     GLM4V request body by JSON
@@ -223,17 +238,20 @@ impl SSEInvokeModel {
         let user_array_message = vec![create_4vjson_message(user_role, user_input)];
 
         let json_request_body = json!({
-        "model": model,
-        "messages": user_array_message,
-        "stream": true
-    });
+            "model": model,
+            "messages": user_array_message,
+            "stream": true
+        });
 
         let json_string = serde_json::to_string(&json_request_body)?;
-        let result = json_string.replace(r"\\\\", r"\\").replace(r"\\", r"").trim().to_string();
+        let result = json_string
+            .replace(r"\\\\", r"\\")
+            .replace(r"\\", r"")
+            .trim()
+            .to_string();
 
         Ok(result)
     }
-
 
     /*
     ChatGLM3 / 4 request body by JSON
@@ -245,31 +263,33 @@ impl SSEInvokeModel {
         system_content: &str,
         user_role: &str,
         user_input: &str,
-        max_token: f64,
         temp_float: f64,
         top_p_float: f64,
     ) -> Result<String, Box<dyn Error>> {
         let message_process = MessageProcessor::new();
 
         let messages = json!([
-        {"role": system_role, "content": system_content},
-        {"role": user_role, "content": message_process.last_messages(user_role,user_input)}
-    ]);
+            {"role": system_role, "content": system_content},
+            {"role": user_role, "content": message_process.last_messages(user_role,user_input)}
+        ]);
 
         let json_request_body = json!({
-        "model": language_model,
-        "messages": messages,
-        "stream": true,
-        "do_sample":true,
-        "max_tokens":max_token,
-        "temperature": temp_float,
-        "top_p": top_p_float
-    });
+            "model": language_model,
+            "messages": messages,
+            "stream": true,
+            "do_sample":true,
+            "temperature": temp_float,
+            "top_p": top_p_float
+        });
 
         let json_string = serde_json::to_string(&json_request_body)?;
 
         // 替换字符，注意使用转义符号
-        let result = json_string.replace(r"\\\\", r"\\").replace(r"\\", r"").trim().to_string();
+        let result = json_string
+            .replace(r"\\\\", r"\\")
+            .replace(r"\\", r"")
+            .trim()
+            .to_string();
 
         // 打印生成的 JSON 字符串
         //println!("{:#}", result.trim());
@@ -277,44 +297,54 @@ impl SSEInvokeModel {
         Ok(result)
     }
 
-
     /*
-     GLM4V_Handler Request by async
-     */
+    GLM4V_Handler Request by async
+    */
 
-    async fn glm4v_handle_sse_request(user_config: &str, part2_content: String) -> Result<String, Box<dyn Error>> {
-        let json_string = match glm4v_read_config(user_config, "glm-4v").await {
+    async fn glm4v_handle_sse_request(
+        glm_version: &str,
+        user_config: &str,
+        part2_content: String,
+    ) -> Result<String, Box<dyn Error>> {
+        let json_string = match glm4v_read_config(user_config, glm_version).await {
             Ok(json_string) => json_string,
             Err(err) => return Err(Box::from(format!("Error reading config file: {}", err))),
         };
 
-        let glm4v_json_value: Value = serde_json::from_str(&json_string)
-            .map_err(|err| Box::new(err))?;
+        let glm4v_json_value: Value =
+            serde_json::from_str(&json_string).map_err(|err| Box::new(err))?;
 
-        let model = glm4v_json_value[0]["model"].as_str().ok_or("Failed to get model")?.to_string();
-        let user_role = glm4v_json_value[0]["user_role"].as_str().ok_or("Failed to get user_role")?.to_string();
+        let model = glm4v_json_value[0]["model"]
+            .as_str()
+            .ok_or("Failed to get model")?
+            .to_string();
+        let user_role = glm4v_json_value[0]["user_role"]
+            .as_str()
+            .ok_or("Failed to get user_role")?
+            .to_string();
 
-        Ok(Self::generate_glm4v_json_request_body(
-            &model,
-            user_role,
-            part2_content,
-        ).await?
-            .to_string())
+        Ok(
+            Self::generate_glm4v_json_request_body(&model, user_role, part2_content)
+                .await?
+                .to_string(),
+        )
     }
 
-
     /*
-     Normal_Handler Request by async
-     */
+    Normal_Handler Request by async
+    */
 
-    async fn async_handle_sse_request(user_config: &str, glm_version: &str, part2_content: String) -> Result<String, Box<dyn Error>> {
+    async fn async_handle_sse_request(
+        user_config: &str,
+        glm_version: &str,
+        part2_content: String,
+    ) -> Result<String, Box<dyn Error>> {
         let json_string = match sse_read_config(user_config, glm_version) {
             Ok(json_string) => json_string,
             Err(err) => return Err(Box::from(format!("Error reading config file: {}", err))),
         };
 
-        let json_value: Value = serde_json::from_str(&json_string)
-            .map_err(|err| Box::new(err))?;
+        let json_value: Value = serde_json::from_str(&json_string).map_err(|err| Box::new(err))?;
 
         let language_model = json_value[0]["language_model"]
             .as_str()
@@ -333,9 +363,6 @@ impl SSEInvokeModel {
             .as_str()
             .ok_or("Failed to get user_role")?
             .to_string();
-        let max_token = json_value[0]["max_tokens"]
-            .as_f64()
-            .ok_or("Failed to get max_token")?;
         let temp_float = json_value[0]["temp_float"]
             .as_f64()
             .ok_or("Failed to get temp_float")?;
@@ -349,22 +376,28 @@ impl SSEInvokeModel {
             &system_content,
             &user_role,
             &part2_content,
-            max_token,
             temp_float,
             top_p_float,
-        ).await?
-            .to_string())
+        )
+        .await?
+        .to_string())
     }
 
     async fn async_mode_checker(require_calling: String) -> bool {
-        require_calling.to_lowercase() == "glm4v"
+        require_calling.to_lowercase() == "glm-4v"
+            || require_calling.to_lowercase() == "glm-4v-plus"
+            || require_calling.to_lowercase() == "glm-4v-flash"
     }
 
     async fn regex_checker(regex: &Regex, input: String) -> bool {
         regex.is_match(&*input)
     }
 
-    async fn json_content_post_function(user_input: String, glm_version: &str, user_config: &str) -> String {
+    async fn json_content_post_function(
+        user_input: String,
+        glm_version: &str,
+        user_config: &str,
+    ) -> String {
         let regex_in = Regex::new(r"(.*?):(.*)").unwrap();
 
         if SSEInvokeModel::regex_checker(&regex_in, user_input.clone()).await {
@@ -384,30 +417,35 @@ impl SSEInvokeModel {
             }
 
             if SSEInvokeModel::async_mode_checker(part1_content.clone()).await {
-                match SSEInvokeModel::glm4v_handle_sse_request(user_config, part2_content.clone()).await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("{}", err);
-                        return String::new();
-                    }
-                }
+                SSEInvokeModel::glm4v_handle_sse_request(
+                    glm_version,
+                    user_config,
+                    part2_content.clone(),
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    println!("{}", err);
+                    String::new()
+                })
             } else {
-                match SSEInvokeModel::async_handle_sse_request(user_config, glm_version, user_input.clone()).await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("{}", err);
-                        return String::new();
-                    }
-                }
+                SSEInvokeModel::async_handle_sse_request(
+                    user_config,
+                    glm_version,
+                    user_input.clone(),
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    println!("{}", err);
+                    String::new()
+                })
             }
         } else {
-            match SSEInvokeModel::async_handle_sse_request(user_config, glm_version, user_input.clone()).await {
-                Ok(result) => result,
-                Err(err) => {
+            SSEInvokeModel::async_handle_sse_request(user_config, glm_version, user_input.clone())
+                .await
+                .unwrap_or_else(|err| {
                     println!("{}", err);
-                    return String::new();
-                }
-            }
+                    String::new()
+                })
         }
     }
 
@@ -443,7 +481,10 @@ impl SSEInvokeModel {
             .map_err(|err| format!("HTTP request failure: {}", err))?;
 
         if !request_result.status().is_success() {
-            return Err(format!("Server returned an error: {}", request_result.status()));
+            return Err(format!(
+                "Server returned an error: {}",
+                request_result.status()
+            ));
         }
 
         let mut response_body = request_result.bytes_stream();
@@ -482,12 +523,12 @@ impl SSEInvokeModel {
         Ok(sse_data)
     }
 
-
     fn process_sse_message(&mut self, response_data: &str, user_message: &str) -> String {
         let mut char_queue = VecDeque::new();
         let mut queue_result = String::new();
 
-        let json_messages: Vec<&str> = response_data.lines()
+        let json_messages: Vec<&str> = response_data
+            .lines()
             .map(|line| line.trim_start_matches("data: "))
             .filter(|line| !line.is_empty())
             .collect();
@@ -502,8 +543,10 @@ impl SSEInvokeModel {
                     if let Some(choices) = json_response.get("choices").and_then(Value::as_array) {
                         if let Some(choice) = choices.get(0).and_then(Value::as_object) {
                             if let Some(delta) = choice.get("delta").and_then(Value::as_object) {
-                                if let Some(content) = delta.get("content").and_then(Value::as_str) {
-                                    let get_message = self.convert_unicode_emojis(content)
+                                if let Some(content) = delta.get("content").and_then(Value::as_str)
+                                {
+                                    let get_message = self
+                                        .convert_unicode_emojis(content)
                                         .replace("\"", "")
                                         .replace("\\n\\n", "\n")
                                         .replace("\\nn", "\n")
@@ -528,7 +571,6 @@ impl SSEInvokeModel {
 
         queue_result.extend(char_queue);
 
-
         if !queue_result.is_empty() {
             let message_process = history_message::HistoryMessage::new();
             message_process.add_history_to_file("user", user_message);
@@ -538,15 +580,15 @@ impl SSEInvokeModel {
         queue_result
     }
 
-
     fn convert_unicode_emojis(&self, input: &str) -> String {
-        UNICODE_REGEX.replace_all(input, |caps: &regex::Captures| {
-            let emoji = char::from_u32(
-                u32::from_str_radix(&caps[0][2..], 16).expect("Failed to parse Unicode escape"),
-            )
+        UNICODE_REGEX
+            .replace_all(input, |caps: &regex::Captures| {
+                let emoji = char::from_u32(
+                    u32::from_str_radix(&caps[0][2..], 16).expect("Failed to parse Unicode escape"),
+                )
                 .expect("Invalid Unicode escape");
-            emoji.to_string()
-        })
+                emoji.to_string()
+            })
             .to_string()
     }
 }

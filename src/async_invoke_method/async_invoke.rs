@@ -18,15 +18,15 @@ struct AiResponse {
     system_content: Option<String>,
     user_role: Option<String>,
     assistant_role: Option<String>,
-    max_tokens: Option<f64>,
     temp_float: Option<f64>,
     top_p_float: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AiConfig {
-    ai_config_glm3: Vec<AiResponse>,
-    ai_config_glm4: Vec<AiResponse>,
+    ai_config_glm4_plus: Vec<AiResponse>,
+    ai_config_glm4_air: Vec<AiResponse>,
+    ai_config_glm4_flash: Vec<AiResponse>,
 }
 
 async fn async_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>> {
@@ -34,8 +34,9 @@ async fn async_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn
     let config: AiConfig = toml::from_str(&file_content)?;
 
     let response = match glm {
-        "glm-3" => config.ai_config_glm3,
-        "glm-4" => config.ai_config_glm4,
+        "glm-4-plus" => config.ai_config_glm4_plus,
+        "glm-4-air" => config.ai_config_glm4_air,
+        "glm-4-flash" => config.ai_config_glm4_flash,
         _ => return Err("Invalid glm4v".into()),
     };
 
@@ -112,7 +113,6 @@ impl AsyncInvokeModel {
         system_content: &str,
         user_role: &str,
         user_input: &str,
-        max_token: f64,
         temp_float: f64,
         top_p_float: f64,
     ) -> Result<String, Box<dyn Error>> {
@@ -135,7 +135,6 @@ impl AsyncInvokeModel {
         "model": language_model,
         "messages": messages,
         "stream": false,
-        "max_tokens":max_token,
         "temperature": temp_float,
         "top_p": top_p_float
     });
@@ -179,9 +178,6 @@ impl AsyncInvokeModel {
         let user_role = json_value[0]["user_role"]
             .as_str().expect("Failed to get user_role").to_string();
 
-        let max_token = json_value[0]["max_tokens"]
-            .as_f64().expect("Failed to get max_token");
-
         let temp_float = json_value[0]["temp_float"]
             .as_f64().expect("Failed to get temp_float");
 
@@ -194,7 +190,6 @@ impl AsyncInvokeModel {
             &system_content,
             &user_role,
             &user_input,
-            max_token,
             temp_float,
             top_p_float,
         ).await {

@@ -1,8 +1,8 @@
 mod time_stamp;
 
+use base64url::encode;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use base64url::encode;
 
 pub struct CustomJwt {
     secret: String,
@@ -51,14 +51,17 @@ impl CustomJwt {
     }
 
     fn jwt_payload(user_id: &str) -> String {
-        let time_now = time_stamp::time_sync();
+        let time_now = time_stamp::time_sync();        //use unwrap_or to handle None
         let exp_time = time_now * 3;
-        format!("{{\"api_key\":\"{}\",\"exp\":{},\"timestamp\":{}}}", user_id, exp_time, time_now)
+        format!(
+            "{{\"api_key\":\"{}\",\"exp\":{},\"timestamp\":{:?}}}",
+            user_id, exp_time, time_now
+        )
     }
 
     fn generate_signature(&self, data: &str) -> Vec<u8> {
-        let mut hmac = Hmac::<Sha256>::new_from_slice(self.secret.as_bytes())
-            .expect("HMAC key error");
+        let mut hmac =
+            Hmac::<Sha256>::new_from_slice(self.secret.as_bytes()).expect("HMAC key error");
         hmac.update(data.as_bytes());
         hmac.finalize().into_bytes().to_vec()
     }

@@ -5,6 +5,7 @@ mod sync_invoke_method;
 mod sse_invoke_method;
 
 use std::collections::HashMap;
+use std::io;
 use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;

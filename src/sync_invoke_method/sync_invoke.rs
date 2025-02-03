@@ -2,13 +2,13 @@ mod history_message;
 
 extern crate toml;
 
-use std::io::prelude::*;
-use std::error::Error;
-use std::fs::File;
 use regex::Regex;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::error::Error;
+use std::fs::File;
+use std::io::prelude::*;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AiResponse {
@@ -17,15 +17,15 @@ struct AiResponse {
     system_content: Option<String>,
     user_role: Option<String>,
     assistant_role: Option<String>,
-    max_tokens: Option<f64>,
     temp_float: Option<f64>,
     top_p_float: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct AiConfig {
-    ai_config_glm3: Vec<AiResponse>,
-    ai_config_glm4: Vec<AiResponse>,
+    ai_config_glm4_plus: Vec<AiResponse>,
+    ai_config_glm4_air: Vec<AiResponse>,
+    ai_config_glm4_flash: Vec<AiResponse>,
 }
 
 fn sync_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>> {
@@ -36,8 +36,9 @@ fn sync_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>
     let config: AiConfig = toml::from_str(&file_content)?;
 
     let response = match glm {
-        "glm-3" => config.ai_config_glm3,
-        "glm-4" => config.ai_config_glm4,
+        "glm-4-plus" => config.ai_config_glm4_plus,
+        "glm-4-air" => config.ai_config_glm4_air,
+        "glm-4-flash" => config.ai_config_glm4_flash,
         _ => return Err(Box::from("Invalid glm")),
     };
 
@@ -58,7 +59,8 @@ struct CogView {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct CogViewConfig3 {
-    ai_cogview_config_3: Vec<CogView>,
+    ai_config_cogview_4: Vec<CogView>,
+    ai_config_cogview_3_flash: Vec<CogView>,
 }
 
 fn cogview_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Error>> {
@@ -69,7 +71,8 @@ fn cogview_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Err
     let config: CogViewConfig3 = toml::from_str(&file_content)?;
 
     let response = match glm {
-        "cogview-3" => config.ai_cogview_config_3,
+        "cogview-4" => config.ai_config_cogview_4,
+        "cogview-3-flash" => config.ai_config_cogview_3_flash,
         _ => return Err(Box::from("Invalid glm")),
     };
 
@@ -77,8 +80,6 @@ fn cogview_read_config(file_path: &str, glm: &str) -> Result<String, Box<dyn Err
 
     Ok(json_string)
 }
-
-
 
 /*
 History Message Controller(Save Messages)
@@ -121,7 +122,6 @@ impl MessageProcessor {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncInvokeModel {
     get_message: String,
@@ -138,14 +138,31 @@ impl SyncInvokeModel {
         }
     }
 
-    pub async fn sync_request(token: String, input: String, glm_version: &str, user_config: &str, iamge_url: String, default_url: String) -> Result<String, Box<dyn Error>> {
+    pub async fn sync_request(
+        token: String,
+        input: String,
+        glm_version: &str,
+        user_config: &str,
+        iamge_url: String,
+        default_url: String,
+    ) -> Result<String, Box<dyn Error>> {
         let mut sync_invoke_model = Self::new();
-        Self::sync_invoke_request_method(&mut sync_invoke_model, token.clone(), input.clone(), glm_version, user_config, iamge_url.clone(), default_url.clone()).await?;
+        Self::sync_invoke_request_method(
+            &mut sync_invoke_model,
+            token.clone(),
+            input.clone(),
+            glm_version,
+            user_config,
+            iamge_url.clone(),
+            default_url.clone(),
+        )
+        .await?;
         let response_message = sync_invoke_model.ai_response_data.clone();
-        let result = sync_invoke_model.choose_task_status(&*response_message, &input).await;
+        let result = sync_invoke_model
+            .choose_task_status(glm_version, &*response_message, &input)
+            .await;
         Ok(result)
     }
-
 
     /*
     cogview request body by JSON
@@ -155,12 +172,16 @@ impl SyncInvokeModel {
         user_input: &str,
     ) -> Result<String, Box<dyn Error>> {
         let json_request_body = json!({
-        "model": model,
-        "prompt": user_input,
-    });
+            "model": model,
+            "prompt": user_input,
+        });
 
         let json_string = serde_json::to_string(&json_request_body)?;
-        let result = json_string.replace(r"\\\\", r"\\").replace(r"\\", r"").trim().to_string();
+        let result = json_string
+            .replace(r"\\\\", r"\\")
+            .replace(r"\\", r"")
+            .trim()
+            .to_string();
 
         Ok(result)
     }
@@ -175,86 +196,103 @@ impl SyncInvokeModel {
         system_content: &str,
         user_role: &str,
         user_input: &str,
-        max_token: f64,
         temp_float: f64,
         top_p_float: f64,
     ) -> Result<String, Box<dyn Error>> {
         let message_process = MessageProcessor::new();
 
         let messages = json!([
-        {"role": system_role, "content": system_content},
-        {"role": user_role, "content": message_process.last_messages(user_role,user_input)}
-    ]);
+            {"role": system_role, "content": system_content},
+            {"role": user_role, "content": message_process.last_messages(user_role,user_input)}
+        ]);
 
         let json_request_body = json!({
-        "model": language_model,
-        "messages": messages,
-        "stream": false,
-        "max_tokens": max_token,
-        "temperature": temp_float,
-        "top_p": top_p_float
-    });
+            "model": language_model,
+            "messages": messages,
+            "stream": false,
+            "temperature": temp_float,
+            "top_p": top_p_float
+        });
 
         let json_string = serde_json::to_string(&json_request_body)?;
-        let result = json_string.replace(r"\\\\", r"\\").replace(r"\\", r"").trim().to_string();
+        let result = json_string
+            .replace(r"\\\\", r"\\")
+            .replace(r"\\", r"")
+            .trim()
+            .to_string();
 
         Ok(result)
     }
 
-
     /*
-     CogView_Handler Request by async
-     */
+    CogView_Handler Request by async
+    */
 
-    async fn cogview_handle_sync_request(user_config: &str, part2_content: String) -> Result<String, Box<dyn Error>> {
-        let json_string = match cogview_read_config(user_config, "cogview-3") {
+    async fn cogview_handle_sync_request(
+        glm_version: &str,
+        user_config: &str,
+        part2_content: String,
+    ) -> Result<String, Box<dyn Error>> {
+        let json_string = match cogview_read_config(user_config, glm_version) {
             Ok(json_string) => json_string,
             Err(err) => return Err(Box::from(format!("Error reading config file: {}", err))),
         };
 
-        let cogview_json_value: Value = serde_json::from_str(&json_string)
-            .map_err(|err| Box::new(err))?;
+        let cogview_json_value: Value =
+            serde_json::from_str(&json_string).map_err(|err| Box::new(err))?;
 
-        let model = cogview_json_value[0]["model"].as_str().expect("Failed to get cogview_model").to_string();
+        let model = cogview_json_value[0]["model"]
+            .as_str()
+            .expect("Failed to get cogview_model")
+            .to_string();
 
-        Ok(Self::generate_cogview_request_body(
-            &model,
-            &part2_content,
-        ).await?
+        Ok(Self::generate_cogview_request_body(&model, &part2_content)
+            .await?
             .to_string())
     }
 
     async fn async_handle_sync_request(
-        user_config: &str, glm_version: &str, part2_content: String,
+        user_config: &str,
+        glm_version: &str,
+        part2_content: String,
     ) -> Result<String, Box<dyn Error>> {
         let json_string = match sync_read_config(user_config, glm_version) {
             Ok(json_string) => json_string,
             Err(err) => return Err(Box::from(format!("Error reading config file: {}", err))),
         };
 
-        let json_value: Value = serde_json::from_str(&json_string)
-            .expect("Failed to parse Toml to JSON");
+        let json_value: Value =
+            serde_json::from_str(&json_string).expect("Failed to parse Toml to JSON");
 
         let language_model = json_value[0]["language_model"]
-            .as_str().expect("Failed to get language_model").to_string();
+            .as_str()
+            .expect("Failed to get language_model")
+            .to_string();
 
         let system_role = json_value[0]["system_role"]
-            .as_str().expect("Failed to get system_role").to_string();
+            .as_str()
+            .expect("Failed to get system_role")
+            .to_string();
 
         let system_content = json_value[0]["system_content"]
-            .as_str().expect("Failed to get system_content").to_string().trim().to_string();
+            .as_str()
+            .expect("Failed to get system_content")
+            .to_string()
+            .trim()
+            .to_string();
 
         let user_role = json_value[0]["user_role"]
-            .as_str().expect("Failed to get user_role").to_string();
-
-        let max_token = json_value[0]["max_tokens"]
-            .as_f64().expect("Failed to get max_token");
+            .as_str()
+            .expect("Failed to get user_role")
+            .to_string();
 
         let temp_float = json_value[0]["temp_float"]
-            .as_f64().expect("Failed to get temp_float");
+            .as_f64()
+            .expect("Failed to get temp_float");
 
         let top_p_float = json_value[0]["top_p_float"]
-            .as_f64().expect("Failed to get top_p_float");
+            .as_f64()
+            .expect("Failed to get top_p_float");
 
         Ok(Self::generate_sync_json_request_body(
             &language_model,
@@ -262,22 +300,27 @@ impl SyncInvokeModel {
             &system_content,
             &user_role,
             &part2_content,
-            max_token,
             temp_float,
             top_p_float,
-        ).await?
-            .to_string())
+        )
+        .await?
+        .to_string())
     }
     async fn sync_mode_checker(require_calling: String) -> bool {
-        require_calling.to_lowercase() == "cogview3"
+        require_calling.to_lowercase() == "cogview-4"
+            || require_calling.to_lowercase() == "cogview-3-flash"
     }
-
 
     async fn regex_checker(regex: &Regex, input: String) -> bool {
         regex.is_match(&*input)
     }
 
-    async fn json_content_post_function(&mut self, user_input: String, glm_version: &str, user_config: &str) -> String {
+    async fn json_content_post_function(
+        &mut self,
+        user_input: String,
+        glm_version: &str,
+        user_config: &str,
+    ) -> String {
         let regex_input = Regex::new(r"(.*?):(.*)").unwrap();
         let mut part1_content = String::new();
         let mut part2_content = String::new();
@@ -298,28 +341,40 @@ impl SyncInvokeModel {
             if SyncInvokeModel::sync_mode_checker(part1_content.clone()).await {
                 let _ = self.fetch_drawer.clear();
                 self.fetch_drawer = part1_content;
-                match SyncInvokeModel::cogview_handle_sync_request(user_config, part2_content.clone()).await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("{}", err);
-                        return String::new();
-                    }
-                }
+                SyncInvokeModel::cogview_handle_sync_request(
+                    glm_version,
+                    user_config,
+                    part2_content.clone(),
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    println!("{}", err);
+                    String::new()
+                })
             } else {
                 let _ = self.fetch_drawer.clear();
                 self.fetch_drawer = part1_content;
-                match SyncInvokeModel::async_handle_sync_request(user_config, glm_version, user_input.clone()).await {
-                    Ok(result) => result,
-                    Err(err) => {
-                        println!("{}", err);
-                        return String::new();
-                    }
-                }
+                SyncInvokeModel::async_handle_sync_request(
+                    user_config,
+                    glm_version,
+                    user_input.clone(),
+                )
+                .await
+                .unwrap_or_else(|err| {
+                    println!("{}", err);
+                    String::new()
+                })
             }
         } else {
             let _ = self.fetch_drawer.clear();
             self.fetch_drawer = "sync".to_string();
-            match SyncInvokeModel::async_handle_sync_request(user_config, glm_version, user_input.clone()).await {
+            match SyncInvokeModel::async_handle_sync_request(
+                user_config,
+                glm_version,
+                user_input.clone(),
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(err) => {
                     println!("{}", err);
@@ -328,7 +383,6 @@ impl SyncInvokeModel {
             }
         }
     }
-
 
     async fn sync_invoke_request_method(
         &mut self,
@@ -339,8 +393,10 @@ impl SyncInvokeModel {
         image_url: String,
         default_url: String,
     ) -> Result<String, String> {
-        let post_json = self.json_content_post_function(user_input, glm_version, user_config).await;
-        let web_url = if &*self.fetch_drawer == "cogview3".to_string() {
+        let post_json = self
+            .json_content_post_function(user_input, glm_version, user_config)
+            .await;
+        let web_url = if &*self.fetch_drawer == glm_version.to_string() {
             image_url
         } else {
             default_url
@@ -357,20 +413,32 @@ impl SyncInvokeModel {
             .map_err(|err| format!("HTTP request failure: {}", err))?;
 
         if !request_result.status().is_success() {
-            return Err(format!("Server returned an error: {}", request_result.status()));
+            return Err(format!(
+                "Server returned an error: {}",
+                request_result.status()
+            ));
         }
 
-        let response_text = request_result.text().await.map_err(|err| format!("Failed to read response text: {}", err))?;
+        let response_text = request_result
+            .text()
+            .await
+            .map_err(|err| format!("Failed to read response text: {}", err))?;
         self.ai_response_data = response_text.clone();
 
         Ok(response_text)
     }
 
-    async fn choose_task_status(&mut self, response_data: &str, user_input: &str) -> String {
-        if &*self.fetch_drawer == "cogview3".to_string() {
+    async fn choose_task_status(
+        &mut self,
+        glm_version: &str,
+        response_data: &str,
+        user_input: &str,
+    ) -> String {
+        if &*self.fetch_drawer == glm_version.to_string() {
             self.process_cogview_task_status(response_data).await
         } else {
-            self.process_sync_task_status(response_data, user_input).await
+            self.process_sync_task_status(response_data, user_input)
+                .await
         }
     }
     async fn process_cogview_task_status(&mut self, response_data: &str) -> String {
@@ -440,7 +508,6 @@ impl SyncInvokeModel {
                 message_process.add_history_to_file("user", user_input);
                 message_process.add_history_to_file("assistant", &*self.get_message);
 
-
                 self.get_message.clone()
             }
             Err(e) => {
@@ -452,7 +519,8 @@ impl SyncInvokeModel {
 
     fn process_message_content(&mut self, content: &str) -> String {
         self.get_message = self.convert_unicode_emojis(content);
-        self.get_message = self.get_message
+        self.get_message = self
+            .get_message
             .replace("\"", "")
             .replace("\\n\\n", "\n")
             .replace("\\nn\\nn", "\n")
@@ -469,7 +537,7 @@ impl SyncInvokeModel {
             let emoji = char::from_u32(
                 u32::from_str_radix(&caps[0][2..], 16).expect("Failed to parse Unicode escape"),
             )
-                .expect("Invalid Unicode escape");
+            .expect("Invalid Unicode escape");
             emoji.to_string()
         });
         result.to_string()
