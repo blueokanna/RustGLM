@@ -3,8 +3,13 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "RustGLM v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to release, for example RustGLM v1.0.0
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -19,28 +24,41 @@ jobs:
     name: Verify, package, and release
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve release tag
+        id: release_ref
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            release_tag="${MANUAL_TAG}"
+          else
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "${release_tag}" =~ ^v.+ ]]; then
+            echo "Release tag must start with v: ${release_tag}" >&2
+            exit 1
+          fi
+
+          echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.release_ref.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
 
-      - name: Require a version tag
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
-            echo "Manual releases must be run from a v* tag." >&2
-            exit 1
-          fi
-
       - name: Verify tag matches Cargo.toml
+        env:
+          RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
         run: |
           package_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "rustglm") | .version')"
           expected_tag="v${package_version}"
-          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match ${expected_tag}." >&2
+          if [[ "${RELEASE_TAG}" != "${expected_tag}" ]]; then
+            echo "Tag ${RELEASE_TAG} does not match ${expected_tag}." >&2
             exit 1
           fi
 
@@ -69,9 +87,10 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            gh release upload "${GITHUB_REF_NAME}" target/package/rustglm-*.crate SHA256SUMS --clobber
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" target/package/rustglm-*.crate SHA256SUMS --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" target/package/rustglm-*.crate SHA256SUMS --verify-tag --generate-notes --title "RustGLM ${GITHUB_REF_NAME}"
+            gh release create "${RELEASE_TAG}" target/package/rustglm-*.crate SHA256SUMS --verify-tag --generate-notes --title "RustGLM ${RELEASE_TAG}"
           fi
