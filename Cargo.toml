@@ -1,0 +1,110 @@
+[package]
+name = "rustglm"
+version = "1.0.0"
+edition = "2024"
+resolver = "2"
+authors = ["blueokanna <blueokanna@gmail.com>"]
+repository = "https://github.com/blueokanna/rustglm.git"
+license = "Apache-2.0"
+description = "Production-oriented async Rust SDK for Zhipu GLM, Realtime, Batch, RAG, and MCP"
+homepage = "https://github.com/blueokanna/rustglm"
+readme = "README.md"
+keywords = ["zhipu", "chatglm", "llm", "ai", "rust-sdk"]
+categories = ["api-bindings", "web-programming::http-client"]
+include = [
+    ".cargo/config.toml",
+    "src/**",
+    "examples/**",
+    "tests/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+]
+
+[badges]
+maintenance = { status = "actively-developed" }
+
+[lib]
+name = "rustglm"
+
+[features]
+default = [
+    "agents",
+    "audio",
+    "batch",
+    "files",
+    "images",
+    "rag",
+    "realtime",
+    "tools",
+    "video",
+]
+full = [
+    "agents",
+    "audio",
+    "batch",
+    "files",
+    "images",
+    "mcp",
+    "rag",
+    "realtime",
+    "tools",
+    "video",
+]
+agents = []
+audio = []
+batch = []
+files = []
+images = []
+mcp = ["dep:rmcp", "tokio/sync"]
+rag = []
+realtime = ["dep:tokio-tungstenite", "tokio/macros", "tokio/net", "tokio/sync"]
+tools = []
+video = []
+
+[dependencies]
+async-stream = "0.3.6"
+async-trait = "0.1.89"
+base64 = "0.22.1"
+futures-util = "0.3.33"
+hmac = "0.13.0"
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "stream", "rustls"] }
+rmcp = { version = "2.2.0", default-features = false, features = ["client", "reqwest", "transport-streamable-http-client-reqwest"], optional = true }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.11.0"
+thiserror = "2.0.19"
+tokio = { version = "1.53.0", features = ["rt", "time"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.53.0", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+
+[[example]]
+name = "realtime_audio_video"
+required-features = ["realtime"]
+
+[[example]]
+name = "official_agent"
+required-features = ["agents"]
+
+[[example]]
+name = "custom_agent"
+required-features = ["agents"]
+
+[[example]]
+name = "glm_4_voice"
+required-features = ["audio"]
+
+[[example]]
+name = "interactive_chat"
+required-features = ["agents"]
+
+[[test]]
+name = "live_realtime"
+required-features = ["realtime"]
+
+[[test]]
+name = "live_zhipu"
+required-features = ["agents", "audio", "batch", "files", "images", "tools", "video"]
