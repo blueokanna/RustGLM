@@ -879,11 +879,53 @@ pub struct EmbeddingRequest {
     pub extra: ExtraFields,
 }
 
+impl EmbeddingRequest {
+    pub fn new(model: impl Into<String>, input: impl Into<EmbeddingInput>) -> Self {
+        Self {
+            model: model.into(),
+            input: input.into(),
+            dimensions: None,
+            encoding_format: None,
+            user_id: None,
+            request_id: None,
+            extra: Map::new(),
+        }
+    }
+
+    pub fn dimensions(mut self, value: u32) -> Self {
+        self.dimensions = Some(value);
+        self
+    }
+
+    pub fn encoding_format(mut self, value: impl Into<String>) -> Self {
+        self.encoding_format = Some(value.into());
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum EmbeddingInput {
     Text(String),
     Texts(Vec<String>),
+}
+
+impl From<String> for EmbeddingInput {
+    fn from(value: String) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<&str> for EmbeddingInput {
+    fn from(value: &str) -> Self {
+        Self::Text(value.to_owned())
+    }
+}
+
+impl From<Vec<String>> for EmbeddingInput {
+    fn from(value: Vec<String>) -> Self {
+        Self::Texts(value)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -924,6 +966,31 @@ pub struct ImageGenerationRequest {
     pub user_id: Option<String>,
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: ExtraFields,
+}
+
+impl ImageGenerationRequest {
+    pub fn new(model: impl Into<String>, prompt: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            prompt: prompt.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn size(mut self, value: impl Into<String>) -> Self {
+        self.size = Some(value.into());
+        self
+    }
+
+    pub fn quality(mut self, value: impl Into<String>) -> Self {
+        self.quality = Some(value.into());
+        self
+    }
+
+    pub fn watermark(mut self, enabled: bool) -> Self {
+        self.watermark_enabled = Some(enabled);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -973,6 +1040,45 @@ pub struct VideoGenerationRequest {
     pub user_id: Option<String>,
     #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
     pub extra: ExtraFields,
+}
+
+impl VideoGenerationRequest {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn prompt(mut self, value: impl Into<String>) -> Self {
+        self.prompt = Some(value.into());
+        self
+    }
+
+    pub fn image_url(mut self, value: impl Into<String>) -> Self {
+        self.image_url = Some(Value::String(value.into()));
+        self
+    }
+
+    pub fn quality(mut self, value: impl Into<String>) -> Self {
+        self.quality = Some(value.into());
+        self
+    }
+
+    pub fn size(mut self, value: impl Into<String>) -> Self {
+        self.size = Some(value.into());
+        self
+    }
+
+    pub fn duration(mut self, seconds: u32) -> Self {
+        self.duration = Some(seconds);
+        self
+    }
+
+    pub fn with_audio(mut self, enabled: bool) -> Self {
+        self.with_audio = Some(enabled);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -1026,6 +1132,36 @@ pub struct RerankRequest {
     pub user_id: Option<String>,
 }
 
+impl RerankRequest {
+    pub fn new(
+        model: impl Into<String>,
+        query: impl Into<String>,
+        documents: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            query: query.into(),
+            documents: documents.into_iter().map(Into::into).collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn top_n(mut self, value: u32) -> Self {
+        self.top_n = Some(value);
+        self
+    }
+
+    pub fn return_documents(mut self, enabled: bool) -> Self {
+        self.return_documents = Some(enabled);
+        self
+    }
+
+    pub fn return_raw_scores(mut self, enabled: bool) -> Self {
+        self.return_raw_scores = Some(enabled);
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct RerankResponse {
     #[serde(default)]
@@ -1062,6 +1198,21 @@ pub struct TokenizerRequest {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+}
+
+impl TokenizerRequest {
+    pub fn new(model: impl Into<String>, messages: impl IntoIterator<Item = ChatMessage>) -> Self {
+        Self {
+            model: model.into(),
+            messages: messages.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+
+    pub fn tools(mut self, values: impl IntoIterator<Item = Tool>) -> Self {
+        self.tools = Some(values.into_iter().collect());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -1105,6 +1256,36 @@ pub struct SpeechRequest {
     pub extra: ExtraFields,
 }
 
+impl SpeechRequest {
+    pub fn new(
+        model: impl Into<String>,
+        input: impl Into<String>,
+        voice: impl Into<String>,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            input: input.into(),
+            voice: voice.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn speed(mut self, value: f32) -> Self {
+        self.speed = Some(value);
+        self
+    }
+
+    pub fn volume(mut self, value: f32) -> Self {
+        self.volume = Some(value);
+        self
+    }
+
+    pub fn response_format(mut self, value: impl Into<String>) -> Self {
+        self.response_format = Some(value.into());
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptionRequest {
     pub model: String,
@@ -1115,6 +1296,40 @@ pub struct TranscriptionRequest {
     pub hotwords: Vec<String>,
     pub request_id: Option<String>,
     pub user_id: Option<String>,
+}
+
+impl TranscriptionRequest {
+    pub fn from_bytes(
+        model: impl Into<String>,
+        file_name: impl Into<String>,
+        file: impl Into<Vec<u8>>,
+    ) -> Self {
+        Self {
+            model: model.into(),
+            file_name: file_name.into(),
+            file: file.into(),
+            mime_type: None,
+            prompt: None,
+            hotwords: Vec::new(),
+            request_id: None,
+            user_id: None,
+        }
+    }
+
+    pub fn mime_type(mut self, value: impl Into<String>) -> Self {
+        self.mime_type = Some(value.into());
+        self
+    }
+
+    pub fn prompt(mut self, value: impl Into<String>) -> Self {
+        self.prompt = Some(value.into());
+        self
+    }
+
+    pub fn hotwords(mut self, values: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.hotwords = values.into_iter().map(Into::into).collect();
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -1137,6 +1352,26 @@ pub struct FileUploadRequest {
     pub file: Vec<u8>,
     pub mime_type: Option<String>,
     pub purpose: String,
+}
+
+impl FileUploadRequest {
+    pub fn from_bytes(
+        file_name: impl Into<String>,
+        file: impl Into<Vec<u8>>,
+        purpose: impl Into<String>,
+    ) -> Self {
+        Self {
+            file_name: file_name.into(),
+            file: file.into(),
+            mime_type: None,
+            purpose: purpose.into(),
+        }
+    }
+
+    pub fn mime_type(mut self, value: impl Into<String>) -> Self {
+        self.mime_type = Some(value.into());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -1462,5 +1697,65 @@ mod tests {
             serde_json::to_value(Thinking::disabled()).unwrap()["type"],
             "disabled"
         );
+    }
+
+    #[test]
+    fn endpoint_request_builders_cover_common_options() {
+        let embedding = EmbeddingRequest::new("embedding-3", "text")
+            .dimensions(1024)
+            .encoding_format("float");
+        assert!(matches!(embedding.input, EmbeddingInput::Text(_)));
+        assert_eq!(embedding.dimensions, Some(1024));
+        assert!(matches!(
+            EmbeddingInput::from(vec!["one".to_owned()]),
+            EmbeddingInput::Texts(_)
+        ));
+
+        let image = ImageGenerationRequest::new("cogview", "prompt")
+            .size("1024x1024")
+            .quality("hd")
+            .watermark(false);
+        assert_eq!(image.size.as_deref(), Some("1024x1024"));
+        assert_eq!(image.watermark_enabled, Some(false));
+
+        let video = VideoGenerationRequest::new("cogvideo")
+            .prompt("prompt")
+            .image_url("https://example.com/input.png")
+            .quality("quality")
+            .size("1920x1080")
+            .duration(5)
+            .with_audio(true);
+        assert_eq!(video.duration, Some(5));
+        assert_eq!(video.with_audio, Some(true));
+
+        let rerank = RerankRequest::new("rerank", "query", ["one", "two"])
+            .top_n(1)
+            .return_documents(true)
+            .return_raw_scores(true);
+        assert_eq!(rerank.documents.len(), 2);
+        assert_eq!(rerank.top_n, Some(1));
+
+        let tokenizer = TokenizerRequest::new("glm", [ChatMessage::user("hello")])
+            .tools([Tool::configured("test", "test", json!({}))]);
+        assert_eq!(tokenizer.tools.unwrap().len(), 1);
+
+        let speech = SpeechRequest::new("glm-tts", "hello", "voice")
+            .speed(1.1)
+            .volume(0.8)
+            .response_format("wav");
+        assert_eq!(speech.speed, Some(1.1));
+        assert_eq!(speech.response_format.as_deref(), Some("wav"));
+
+        let transcription = TranscriptionRequest::from_bytes("glm-asr", "audio.wav", [1, 2])
+            .mime_type("audio/wav")
+            .prompt("verbatim")
+            .hotwords(["Rust", "GLM"]);
+        assert_eq!(transcription.file, vec![1, 2]);
+        assert_eq!(transcription.hotwords, ["Rust", "GLM"]);
+
+        let file = FileUploadRequest::from_bytes("input.jsonl", [1, 2], "batch")
+            .mime_type("application/jsonl");
+        assert_eq!(file.file_name, "input.jsonl");
+        assert_eq!(file.mime_type.as_deref(), Some("application/jsonl"));
     }
 }

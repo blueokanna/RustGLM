@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - "RustGLM v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Version tag to release, for example RustGLM v1.0.0
+        description: Version tag to release, for example v1.0.0
         required: true
         type: string
 
@@ -35,17 +35,16 @@ jobs:
             release_tag="${GITHUB_REF_NAME}"
           fi
 
-          if [[ ! "${release_tag}" =~ ^v.+ ]]; then
-            echo "Release tag must start with v: ${release_tag}" >&2
+          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use the form v<semver>, for example v1.0.0: ${release_tag}" >&2
             exit 1
           fi
 
           echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ steps.release_ref.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
@@ -79,6 +78,29 @@ jobs:
         run: |
           cd target/package
           sha256sum rustglm-*.crate > ../../SHA256SUMS
+
+      - name: Ensure release tag points at the verified commit
+        env:
+          RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
+        run: |
+          tag_ref="refs/tags/${RELEASE_TAG}"
+          head_commit="$(git rev-parse HEAD)"
+
+          if git show-ref --verify --quiet "${tag_ref}"; then
+            tag_commit="$(git rev-list -n 1 "${RELEASE_TAG}")"
+            if [[ "${tag_commit}" != "${head_commit}" ]]; then
+              echo "Tag ${RELEASE_TAG} points to ${tag_commit}, not verified commit ${head_commit}." >&2
+              exit 1
+            fi
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${RELEASE_TAG}" -m "RustGLM ${RELEASE_TAG}" "${head_commit}"
+            git push origin "${tag_ref}"
+          else
+            echo "Tag ${RELEASE_TAG} was not fetched for this tag-triggered release." >&2
+            exit 1
+          fi
 
       - name: Publish to crates.io
         if: env.CARGO_REGISTRY_TOKEN != ''

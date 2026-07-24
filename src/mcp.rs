@@ -253,22 +253,58 @@ mod tests {
 
     #[test]
     fn configuration_is_explicit_and_redacts_tokens() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-source", HeaderValue::from_static("test"));
         let config = McpClientConfig::new("https://mcp.example.com")
             .bearer_token("secret")
             .header("x-tenant", "acme")
-            .unwrap();
+            .unwrap()
+            .headers(headers)
+            .http_client(reqwest::Client::new())
+            .reinitialize_expired_session(true);
         let debug = format!("{config:?}");
         assert!(debug.contains("[REDACTED]"));
         assert!(!debug.contains("secret"));
-        assert!(!config.reinitialize_expired_session);
+        assert!(config.reinitialize_expired_session);
+        assert_eq!(config.headers["x-source"], "test");
+        assert!(
+            McpClientConfig::new("https://mcp.example.com")
+                .header("invalid header", "value")
+                .is_err()
+        );
+        assert!(
+            McpClientConfig::new("https://mcp.example.com")
+                .header("x-value", "invalid\nvalue")
+                .is_err()
+        );
     }
 
     #[test]
     fn rejects_non_http_transport_urls_before_network_io() {
-        let error = validate_endpoint("file:///tmp/mcp.sock").unwrap_err();
-        assert!(matches!(
-            error,
-            crate::SdkError::Mcp(McpClientError::InvalidEndpoint(_))
-        ));
+        for endpoint in ["file:///tmp/mcp.sock", "relative", "ftp://example.com/mcp"] {
+            let error = validate_endpoint(endpoint).unwrap_err();
+            assert!(matches!(
+                error,
+                crate::SdkError::Mcp(McpClientError::InvalidEndpoint(_))
+            ));
+        }
+        assert!(validate_endpoint("http://localhost:8080/mcp").is_ok());
+    }
+
+    #[tokio::test]
+    async fn connection_rejects_invalid_configuration_before_io() {
+        assert!(
+            McpClientConfig::new("file:///tmp/mcp.sock")
+                .connect()
+                .await
+                .is_err()
+        );
+        assert!(
+            McpClientConfig::new("https://mcp.example.com")
+                .bearer_token(" ")
+                .connect()
+                .await
+                .is_err()
+        );
     }
 }

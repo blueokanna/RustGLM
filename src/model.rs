@@ -76,6 +76,11 @@ const fn vision_capabilities(thinking: bool) -> ModelCapabilities {
 model_marker!(Glm52, "glm-5.2", text_capabilities(true, true, true));
 model_marker!(Glm51, "glm-5.1", text_capabilities(true, false, true));
 model_marker!(
+    Glm51Highspeed,
+    "glm-5.1-highspeed",
+    text_capabilities(true, false, true)
+);
+model_marker!(
     Glm5Turbo,
     "glm-5-turbo",
     text_capabilities(true, false, true)
@@ -85,12 +90,12 @@ model_marker!(Glm47, "glm-4.7", text_capabilities(true, false, true));
 model_marker!(
     Glm47Flash,
     "glm-4.7-flash",
-    text_capabilities(true, false, true)
+    text_capabilities(true, false, false)
 );
 model_marker!(
     Glm47FlashX,
     "glm-4.7-flashx",
-    text_capabilities(true, false, true)
+    text_capabilities(true, false, false)
 );
 model_marker!(Glm46, "glm-4.6", text_capabilities(true, false, true));
 model_marker!(
@@ -120,6 +125,7 @@ model_marker!(
 );
 
 model_marker!(Glm5vTurbo, "glm-5v-turbo", vision_capabilities(true));
+model_marker!(AutoGlmPhone, "autoglm-phone", vision_capabilities(false));
 model_marker!(Glm46v, "glm-4.6v", vision_capabilities(true));
 model_marker!(Glm46vFlash, "glm-4.6v-flash", vision_capabilities(true));
 model_marker!(Glm46vFlashX, "glm-4.6v-flashx", vision_capabilities(true));
@@ -158,6 +164,7 @@ macro_rules! impl_tool_stream {
 impl_text!(
     Glm52,
     Glm51,
+    Glm51Highspeed,
     Glm5Turbo,
     Glm5,
     Glm47,
@@ -172,6 +179,7 @@ impl_text!(
 );
 impl_vision!(
     Glm5vTurbo,
+    AutoGlmPhone,
     Glm46v,
     Glm46vFlash,
     Glm46vFlashX,
@@ -182,6 +190,7 @@ impl_vision!(
 impl_thinking!(
     Glm52,
     Glm51,
+    Glm51Highspeed,
     Glm5Turbo,
     Glm5,
     Glm47,
@@ -202,6 +211,7 @@ impl SupportsReasoningEffort for Glm52 {}
 impl_tools!(
     Glm52,
     Glm51,
+    Glm51Highspeed,
     Glm5Turbo,
     Glm5,
     Glm47,
@@ -214,6 +224,7 @@ impl_tools!(
     Glm4Flash250414,
     Glm4FlashX250414,
     Glm5vTurbo,
+    AutoGlmPhone,
     Glm46v,
     Glm46vFlash,
     Glm46vFlashX,
@@ -221,16 +232,7 @@ impl_tools!(
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
 );
-impl_tool_stream!(
-    Glm52,
-    Glm51,
-    Glm5Turbo,
-    Glm5,
-    Glm47,
-    Glm47Flash,
-    Glm47FlashX,
-    Glm46
-);
+impl_tool_stream!(Glm52, Glm51, Glm51Highspeed, Glm5Turbo, Glm5, Glm47, Glm46);
 
 mod request_state {
     pub trait Sealed {}
@@ -459,6 +461,7 @@ mod tests {
         let models = [
             model_descriptor::<Glm52>(),
             model_descriptor::<Glm51>(),
+            model_descriptor::<Glm51Highspeed>(),
             model_descriptor::<Glm5Turbo>(),
             model_descriptor::<Glm5>(),
             model_descriptor::<Glm47>(),
@@ -471,6 +474,7 @@ mod tests {
             model_descriptor::<Glm4Flash250414>(),
             model_descriptor::<Glm4FlashX250414>(),
             model_descriptor::<Glm5vTurbo>(),
+            model_descriptor::<AutoGlmPhone>(),
             model_descriptor::<Glm46v>(),
             model_descriptor::<Glm46vFlash>(),
             model_descriptor::<Glm46vFlashX>(),
@@ -484,6 +488,7 @@ mod tests {
             [
                 "glm-5.2",
                 "glm-5.1",
+                "glm-5.1-highspeed",
                 "glm-5-turbo",
                 "glm-5",
                 "glm-4.7",
@@ -496,6 +501,7 @@ mod tests {
                 "glm-4-flash-250414",
                 "glm-4-flashx-250414",
                 "glm-5v-turbo",
+                "autoglm-phone",
                 "glm-4.6v",
                 "glm-4.6v-flash",
                 "glm-4.6v-flashx",
@@ -506,8 +512,9 @@ mod tests {
         );
         assert!(models[0].1.reasoning_effort);
         assert!(models[1].1.tool_stream);
-        assert!(models[13].1.vision);
-        assert!(!models[13].1.tool_stream);
+        assert!(models[14].1.vision);
+        assert!(!models[14].1.tool_stream);
+        assert!(!model_descriptor::<Glm47Flash>().1.tool_stream);
     }
 
     #[test]

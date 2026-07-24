@@ -2,6 +2,7 @@
 name = "rustglm"
 version = "1.0.0"
 edition = "2024"
+rust-version = "1.88"
 resolver = "2"
 authors = ["blueokanna <blueokanna@gmail.com>"]
 repository = "https://github.com/blueokanna/rustglm.git"
@@ -19,8 +20,13 @@ include = [
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
+    "README_zh.md",
+    "docs/**",
     "LICENSE",
 ]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [badges]
 maintenance = { status = "actively-developed" }
@@ -100,6 +106,90 @@ required-features = ["audio"]
 [[example]]
 name = "interactive_chat"
 required-features = ["agents"]
+
+[[example]]
+name = "file_batch"
+required-features = ["batch", "files"]
+
+[[example]]
+name = "knowledge_base"
+required-features = ["rag"]
+
+[[example]]
+name = "web_search"
+required-features = ["tools"]
+
+[[example]]
+name = "image_generation"
+required-features = ["images"]
+
+[[example]]
+name = "video_generation"
+required-features = ["video"]
+
+[[example]]
+name = "speech"
+required-features = ["audio"]
+
+[[example]]
+name = "transcription"
+required-features = ["audio"]
+
+[[example]]
+name = "voice_management"
+required-features = ["audio"]
+
+[[example]]
+name = "file_management"
+required-features = ["files"]
+
+[[example]]
+name = "file_parsing"
+required-features = ["files"]
+
+[[example]]
+name = "document_understanding"
+required-features = ["files", "tools"]
+
+[[example]]
+name = "batch_management"
+required-features = ["batch"]
+
+[[example]]
+name = "knowledge_management"
+required-features = ["rag"]
+
+[[example]]
+name = "knowledge_documents"
+required-features = ["rag"]
+
+[[example]]
+name = "knowledge_retrieval"
+required-features = ["rag"]
+
+[[example]]
+name = "retrieval_agent"
+required-features = ["rag"]
+
+[[example]]
+name = "hosted_tools"
+required-features = ["tools"]
+
+[[example]]
+name = "assistants"
+required-features = ["agents"]
+
+[[example]]
+name = "official_agent_lifecycle"
+required-features = ["agents"]
+
+[[example]]
+name = "tool_stream"
+required-features = ["tools"]
+
+[[example]]
+name = "mcp_client"
+required-features = ["mcp"]
 
 [[test]]
 name = "live_realtime"

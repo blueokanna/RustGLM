@@ -1,2 +1,6 @@
 [resolver]
 incompatible-rust-versions = "fallback"
+
+[alias]
+coverage = "llvm-cov --locked --all-features --all-targets --summary-only --fail-under-lines 90"
+coverage-lcov = "llvm-cov --locked --all-features --all-targets --lcov --output-path target/rustglm-lcov.info --fail-under-lines 90"
