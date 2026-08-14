@@ -237,7 +237,16 @@ impl_tools!(
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
 );
-impl_tool_stream!(Glm53, Glm52, Glm51, Glm51Highspeed, Glm5Turbo, Glm5, Glm47, Glm46);
+impl_tool_stream!(
+    Glm53,
+    Glm52,
+    Glm51,
+    Glm51Highspeed,
+    Glm5Turbo,
+    Glm5,
+    Glm47,
+    Glm46
+);
 
 mod request_state {
     pub trait Sealed {}

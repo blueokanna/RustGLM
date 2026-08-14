@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use nextjson::Value;
-use nextjson::NsonSerialize as Serialize;
 use nextjson::NsonDeserialize as Deserialize;
+use nextjson::NsonSerialize as Serialize;
+use nextjson::Value;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, Method, Response, StatusCode};
 use tokio::time::sleep;
@@ -165,7 +165,13 @@ impl Transport {
         accept: &str,
     ) -> Result<Bytes> {
         let response = self
-            .send_bytes(Method::POST, path, encode(body)?, "application/json", accept)
+            .send_bytes(
+                Method::POST,
+                path,
+                encode(body)?,
+                "application/json",
+                accept,
+            )
             .await?;
         Ok(response.bytes().await?)
     }
@@ -226,8 +232,14 @@ impl Transport {
     {
         let response = match body {
             Some(body) => {
-                self.send_bytes(method, path, encode(body)?, "application/json", "application/json")
-                    .await?
+                self.send_bytes(
+                    method,
+                    path,
+                    encode(body)?,
+                    "application/json",
+                    "application/json",
+                )
+                .await?
             }
             None => self.send_empty(method, path, "application/json").await?,
         };

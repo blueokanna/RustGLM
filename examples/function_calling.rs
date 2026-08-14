@@ -1,5 +1,5 @@
-use rustglm::{ChatCompletionRequest, ChatMessage, FunctionDefinition, Tool, ZhipuClient};
 use nextjson::json;
+use rustglm::{ChatCompletionRequest, ChatMessage, FunctionDefinition, Tool, ZhipuClient};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

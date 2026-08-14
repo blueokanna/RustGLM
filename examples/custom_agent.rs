@@ -2,11 +2,11 @@ use std::io::{self, Write};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use nextjson::{Value, json};
 use rustglm::{
     AgentHistoryPolicy, AgentManifest, AgentPersona, AgentRuntime, AgentTool, FunctionDefinition,
     Result as SdkResult, ZhipuClient,
 };
-use nextjson::{Value, json};
 
 struct DeviceInfoTool;
 

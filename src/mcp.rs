@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
+use nextjson::Map;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, GetPromptRequestParams, GetPromptResult, Prompt,
@@ -12,7 +13,6 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::common::client_side_sse::NeverRetry;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{Peer, RoleClient, ServiceExt};
-use nextjson::Map;
 
 use crate::{McpClientError, Result};
 
@@ -165,7 +165,11 @@ impl McpClient {
             .map_err(|error| McpClientError::Request(error.to_string()).into())
     }
 
-    pub async fn call_tool(&self, name: impl Into<String>, arguments: Option<Map>) -> Result<McpToolResult> {
+    pub async fn call_tool(
+        &self,
+        name: impl Into<String>,
+        arguments: Option<Map>,
+    ) -> Result<McpToolResult> {
         let name = name.into();
         if name.trim().is_empty() {
             return Err(McpClientError::Request("tool name cannot be empty".into()).into());

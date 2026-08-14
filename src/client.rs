@@ -2,13 +2,8 @@ use std::sync::Arc;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
-use reqwest::Method;
-#[cfg(feature = "rag")]
-use reqwest::header::{HeaderMap, HeaderValue};
-#[cfg(any(feature = "audio", feature = "files"))]
-use reqwest::multipart::{Form, Part};
-use nextjson::NsonSerialize as Serialize;
 use nextjson::NsonDeserialize as Deserialize;
+use nextjson::NsonSerialize as Serialize;
 #[cfg(any(
     feature = "agents",
     feature = "audio",
@@ -17,7 +12,14 @@ use nextjson::NsonDeserialize as Deserialize;
     feature = "tools"
 ))]
 use nextjson::Value;
+use reqwest::Method;
+#[cfg(feature = "rag")]
+use reqwest::header::{HeaderMap, HeaderValue};
+#[cfg(any(feature = "audio", feature = "files"))]
+use reqwest::multipart::{Form, Part};
 
+#[cfg(any(feature = "audio", feature = "files"))]
+use crate::Bytes;
 #[cfg(feature = "video")]
 use crate::VideoGenerationRequest;
 #[cfg(feature = "agents")]
@@ -32,8 +34,6 @@ use crate::{
     AgentAsyncResultRequest, AgentAsyncResultResponse, AgentConversationRequest,
     AgentConversationResponse, OfficialAgentRequest, OfficialAgentResponse, OfficialAgentStream,
 };
-#[cfg(any(feature = "audio", feature = "files"))]
-use crate::Bytes;
 use crate::{
     AsyncTaskResponse, AsyncTaskResult, ChatCompletionChunk, ChatCompletionRequest,
     ChatCompletionResponse, EmbeddingRequest, EmbeddingResponse, HttpConfig, RerankRequest,

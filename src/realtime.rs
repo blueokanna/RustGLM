@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures_util::{SinkExt, StreamExt};
-use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 use nextjson::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -892,7 +892,10 @@ mod tests {
             value["session"]["turn_detection"]["type"].as_str(),
             Some("server_vad")
         );
-        assert_eq!(value["session"]["tools"][0]["name"].as_str(), Some("weather"));
+        assert_eq!(
+            value["session"]["tools"][0]["name"].as_str(),
+            Some("weather")
+        );
         assert_eq!(value["session"]["max_output_tokens"].as_u64(), Some(1024));
         assert!(value["session"].get("max_response_output_tokens").is_none());
 
@@ -907,8 +910,8 @@ mod tests {
             frame["type"].as_str(),
             Some("input_audio_buffer.append_video_frame")
         );
-        let transcription = nextjson::to_value(&
-            RealtimeClientEvent::transcription_session_update(
+        let transcription = nextjson::to_value(
+            &RealtimeClientEvent::transcription_session_update(
                 RealtimeTranscriptionSession::default(),
             )
             .unwrap(),

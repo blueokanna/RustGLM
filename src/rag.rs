@@ -1,8 +1,8 @@
+use nextjson::FormatError;
+use nextjson::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 use reqwest::Method;
 use reqwest::multipart::{Form, Part};
-use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
-use nextjson::{Map, Value};
-use nextjson::FormatError;
 
 use crate::wire_enum;
 
@@ -62,7 +62,7 @@ impl<'de> Deserialize<'de> for KnowledgeEmbeddingModel {
             value => {
                 return Err(D::Error::custom(format!(
                     "unsupported knowledge embedding model id {value}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -125,7 +125,7 @@ impl<'de> Deserialize<'de> for Contextualization {
             value => {
                 return Err(D::Error::custom(format!(
                     "invalid contextualization value {value}"
-                )))
+                )));
             }
         }
         Ok(())
@@ -391,7 +391,7 @@ impl<'de> Deserialize<'de> for DocumentChunking {
             value => {
                 return Err(D::Error::custom(format!(
                     "unsupported document chunking mode {value}"
-                )))
+                )));
             }
         }
         Ok(())

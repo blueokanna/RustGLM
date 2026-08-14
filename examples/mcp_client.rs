@@ -1,5 +1,5 @@
-use rustglm::McpClientConfig;
 use nextjson::Map;
+use rustglm::McpClientConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

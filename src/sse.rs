@@ -69,8 +69,7 @@ impl<T: for<'de> Deserialize<'de>> SseDecoder<T> {
     fn drain(&mut self, finish: bool) -> Result<Vec<T>> {
         let mut values = Vec::new();
         let mut cursor = self.consumed;
-        while let Some(position) = self.buffer[cursor..].iter().position(|byte| *byte == b'\n')
-        {
+        while let Some(position) = self.buffer[cursor..].iter().position(|byte| *byte == b'\n') {
             let line_start = cursor;
             let line_end = line_start + position;
             let line = trim_cr(&self.buffer[line_start..line_end]);
@@ -220,9 +219,6 @@ mod tests {
     fn rejects_oversized_events_without_unbounded_growth() {
         let mut decoder = decoder();
         let oversized = vec![b'a'; MAX_EVENT_BYTES + 1];
-        assert!(matches!(
-            decoder.push(&oversized),
-            Err(SdkError::Stream(_))
-        ));
+        assert!(matches!(decoder.push(&oversized), Err(SdkError::Stream(_))));
     }
 }

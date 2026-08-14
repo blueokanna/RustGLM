@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
-use reqwest::header::HeaderValue;
 use nextjson::NsonSerialize as Serialize;
+use reqwest::header::HeaderValue;
 use sha2::Sha256;
 
 use crate::{Result, SdkError};
@@ -64,9 +64,7 @@ impl JwtAuthentication {
                 "JWT API key must contain exactly one dot separating key id and secret".into(),
             ));
         }
-        if api_key.chars().any(char::is_whitespace)
-            || api_secret.chars().any(char::is_whitespace)
-        {
+        if api_key.chars().any(char::is_whitespace) || api_secret.chars().any(char::is_whitespace) {
             return Err(SdkError::Configuration(
                 "JWT key id and secret cannot contain whitespace".into(),
             ));
@@ -306,7 +304,15 @@ mod tests {
 
     #[test]
     fn rejects_invalid_combined_api_keys() {
-        for value in ["", "key", ".secret", "key.", "a.b.c", "key. secret", "key .secret"] {
+        for value in [
+            "",
+            "key",
+            ".secret",
+            "key.",
+            "a.b.c",
+            "key. secret",
+            "key .secret",
+        ] {
             assert!(JwtAuthentication::from_api_key(value).is_err(), "{value}");
         }
     }

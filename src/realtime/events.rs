@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 use nextjson::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
 use crate::wire_enum;
 
@@ -1232,10 +1232,12 @@ mod tests {
                 "Get weather",
                 json!({"type":"object"}),
             ));
-        let value =
-            nextjson::to_value(&RealtimeRequest::session_update(session).unwrap()).unwrap();
+        let value = nextjson::to_value(&RealtimeRequest::session_update(session).unwrap()).unwrap();
         assert_eq!(value["type"].as_str(), Some("session.update"));
-        assert_eq!(value["session"]["model"].as_str(), Some("glm-realtime-flash"));
+        assert_eq!(
+            value["session"]["model"].as_str(),
+            Some("glm-realtime-flash")
+        );
         assert_eq!(
             value["session"]["turn_detection"]["type"].as_str(),
             Some("server_vad")
@@ -1254,8 +1256,8 @@ mod tests {
             instructions: Some("brief".into()),
             ..RealtimeResponseOptions::default()
         };
-        let value = nextjson::to_value(&RealtimeRequest::create_response(Some(options)).unwrap())
-            .unwrap();
+        let value =
+            nextjson::to_value(&RealtimeRequest::create_response(Some(options)).unwrap()).unwrap();
         assert_eq!(value["response"]["commit"].as_bool(), Some(true));
         assert_eq!(value["response"]["cancel_previous"].as_bool(), Some(true));
     }
@@ -1460,7 +1462,10 @@ mod tests {
 
         assert_eq!(kinds[0].as_str(), Some("transcription_session.update"));
         assert_eq!(kinds[1].as_str(), Some("input_audio_buffer.append"));
-        assert_eq!(kinds[2].as_str(), Some("input_audio_buffer.append_video_frame"));
+        assert_eq!(
+            kinds[2].as_str(),
+            Some("input_audio_buffer.append_video_frame")
+        );
         assert_eq!(kinds[8].as_str(), Some("response.cancel"));
         assert!(RealtimeRequest::append_audio(&[]).is_err());
         assert!(RealtimeRequest::append_video_frame(&[]).is_err());

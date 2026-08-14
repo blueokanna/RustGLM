@@ -1583,7 +1583,10 @@ mod tests {
             FunctionDefinition::new("lookup", json!({"type":"object"})).description("lookup data");
         let tool = Tool::function(function);
         let value = nextjson::to_value(&tool).unwrap();
-        assert_eq!(value["function"]["description"].as_str(), Some("lookup data"));
+        assert_eq!(
+            value["function"]["description"].as_str(),
+            Some("lookup data")
+        );
         let choice = ToolChoice::Function {
             kind: "function".into(),
             function: ToolChoiceFunction {

@@ -1,9 +1,9 @@
 use futures_util::StreamExt;
+use nextjson::json;
 use rustglm::{
     FunctionDefinition, Glm53, ResponseContent, Tool, ToolStreamEvent, TypedChatRequest,
     ZhipuClient,
 };
-use nextjson::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

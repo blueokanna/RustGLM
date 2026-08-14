@@ -16,9 +16,9 @@ mod sse;
 mod tool_stream;
 mod transport;
 mod types;
-mod wire_enum;
 #[cfg(feature = "audio")]
 mod voice;
+mod wire_enum;
 
 pub mod client;
 
@@ -26,13 +26,13 @@ pub mod client;
 pub use agent::*;
 pub use auth::{JwtAuthentication, ZhipuAuthentication};
 pub use bytes::Bytes;
-pub use nextjson::{NsonDeserialize, NsonSerialize};
 pub use client::{OpenAiCompatibleClient, OpenAiCompatibleConfig, ZhipuClient, ZhipuConfig};
 pub use error::*;
 #[cfg(feature = "mcp")]
 pub use mcp::*;
 pub use memory::*;
 pub use model::*;
+pub use nextjson::{NsonDeserialize, NsonSerialize};
 pub use provider::{ChatProvider, ChatStream, ProviderCapabilities};
 #[cfg(feature = "rag")]
 pub use rag::*;

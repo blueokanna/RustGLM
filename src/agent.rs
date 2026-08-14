@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_util::Stream;
-use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 use nextjson::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
 use crate::wire_enum;
 
