@@ -1,7 +1,10 @@
 use reqwest::Method;
 use reqwest::multipart::{Form, Part};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use nextjson::{Map, Value};
+use nextjson::FormatError;
+
+use crate::wire_enum;
 
 use crate::client::encode_component;
 use crate::{RagError, Result, ValidationError, ZhipuClient};
@@ -35,52 +38,61 @@ impl KnowledgeEmbeddingModel {
 }
 
 impl Serialize for KnowledgeEmbeddingModel {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u8(self.id())
+    fn nextencode<E: nextjson::FormatEncoder>(
+        &self,
+        encoder: &mut E,
+    ) -> std::result::Result<(), E::Error> {
+        encoder.write_u8(self.id())
     }
+}
+
+impl nextjson::NsonSchema for KnowledgeEmbeddingModel {
+    const SCHEMA: nextjson::TypeSchema = nextjson::TypeSchema::U8;
 }
 
 impl<'de> Deserialize<'de> for KnowledgeEmbeddingModel {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        match u8::deserialize(deserializer)? {
-            3 => Ok(Self::Embedding2),
-            11 => Ok(Self::Embedding3),
-            12 => Ok(Self::Embedding3Pro),
-            value => Err(serde::de::Error::custom(format!(
-                "unsupported knowledge embedding model id {value}"
-            ))),
+    fn nextdecode_into<D: nextjson::FormatDecoder<'de>>(
+        decoder: &mut D,
+        out: &mut nextjson::DecodeSlot<Self>,
+    ) -> std::result::Result<(), D::Error> {
+        match decoder.u8()? {
+            3 => out.write(Self::Embedding2),
+            11 => out.write(Self::Embedding3),
+            12 => out.write(Self::Embedding3Pro),
+            value => {
+                return Err(D::Error::custom(format!(
+                    "unsupported knowledge embedding model id {value}"
+                )))
+            }
         }
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum KnowledgeBackground {
-    Blue,
-    Red,
-    Orange,
-    Purple,
-    Sky,
-    Green,
-    Yellow,
+wire_enum! {
+    /// Knowledge base background color.
+    pub enum KnowledgeBackground {
+        Blue => "blue",
+        Red => "red",
+        Orange => "orange",
+        Purple => "purple",
+        Sky => "sky",
+        Green => "green",
+        Yellow => "yellow",
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum KnowledgeIcon {
-    Question,
-    Book,
-    Seal,
-    Wrench,
-    Tag,
-    Horn,
-    House,
+wire_enum! {
+    /// Knowledge base icon.
+    pub enum KnowledgeIcon {
+        Question => "question",
+        Book => "book",
+        Seal => "seal",
+        Wrench => "wrench",
+        Tag => "tag",
+        Horn => "horn",
+        House => "house",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,26 +102,33 @@ pub enum Contextualization {
 }
 
 impl Serialize for Contextualization {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u8(matches!(self, Self::Enabled) as u8)
+    fn nextencode<E: nextjson::FormatEncoder>(
+        &self,
+        encoder: &mut E,
+    ) -> std::result::Result<(), E::Error> {
+        encoder.write_u8(matches!(self, Self::Enabled) as u8)
     }
 }
 
+impl nextjson::NsonSchema for Contextualization {
+    const SCHEMA: nextjson::TypeSchema = nextjson::TypeSchema::U8;
+}
+
 impl<'de> Deserialize<'de> for Contextualization {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        match u8::deserialize(deserializer)? {
-            0 => Ok(Self::Disabled),
-            1 => Ok(Self::Enabled),
-            value => Err(serde::de::Error::custom(format!(
-                "invalid contextualization value {value}"
-            ))),
+    fn nextdecode_into<D: nextjson::FormatDecoder<'de>>(
+        decoder: &mut D,
+        out: &mut nextjson::DecodeSlot<Self>,
+    ) -> std::result::Result<(), D::Error> {
+        match decoder.u8()? {
+            0 => out.write(Self::Disabled),
+            1 => out.write(Self::Enabled),
+            value => {
+                return Err(D::Error::custom(format!(
+                    "invalid contextualization value {value}"
+                )))
+            }
         }
+        Ok(())
     }
 }
 
@@ -157,7 +176,7 @@ pub struct KnowledgeUpdateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callback_url: Option<String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub callback_header: Map<String, Value>,
+    pub callback_header: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -171,7 +190,7 @@ pub struct RagResponse<T> {
     #[serde(default)]
     pub timestamp: i64,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -228,21 +247,28 @@ pub struct KnowledgeCapacity {
     pub total: CapacityValue,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum RecallMethod {
-    Embedding,
-    Keyword,
-    #[default]
-    Mixed,
+wire_enum! {
+    /// Knowledge recall method.
+    pub enum RecallMethod {
+        Embedding => "embedding",
+        Keyword => "keyword",
+        Mixed => "mixed",
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RagRerankModel {
-    #[serde(rename = "rerank")]
-    Rerank,
-    #[serde(rename = "rerank-pro")]
-    RerankPro,
+#[allow(clippy::derivable_impls)]
+impl Default for RecallMethod {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
+wire_enum! {
+    /// Rerank model identifier.
+    pub enum RagRerankModel {
+        Rerank => "rerank",
+        RerankPro => "rerank-pro",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -305,7 +331,7 @@ pub struct RetrievalMetadata {
     #[serde(default)]
     pub contextual_text: String,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -317,7 +343,7 @@ pub struct RetrievalMatch {
     #[serde(default)]
     pub metadata: RetrievalMetadata,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -338,30 +364,37 @@ impl DocumentChunking {
 }
 
 impl Serialize for DocumentChunking {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u8(self.code())
+    fn nextencode<E: nextjson::FormatEncoder>(
+        &self,
+        encoder: &mut E,
+    ) -> std::result::Result<(), E::Error> {
+        encoder.write_u8(self.code())
     }
 }
 
+impl nextjson::NsonSchema for DocumentChunking {
+    const SCHEMA: nextjson::TypeSchema = nextjson::TypeSchema::U8;
+}
+
 impl<'de> Deserialize<'de> for DocumentChunking {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        match u8::deserialize(deserializer)? {
-            1 => Ok(Self::Heading),
-            2 => Ok(Self::QuestionAnswer),
-            3 => Ok(Self::Row),
-            5 => Ok(Self::Custom),
-            6 => Ok(Self::Page),
-            7 => Ok(Self::Single),
-            value => Err(serde::de::Error::custom(format!(
-                "unsupported document chunking mode {value}"
-            ))),
+    fn nextdecode_into<D: nextjson::FormatDecoder<'de>>(
+        decoder: &mut D,
+        out: &mut nextjson::DecodeSlot<Self>,
+    ) -> std::result::Result<(), D::Error> {
+        match decoder.u8()? {
+            1 => out.write(Self::Heading),
+            2 => out.write(Self::QuestionAnswer),
+            3 => out.write(Self::Row),
+            5 => out.write(Self::Custom),
+            6 => out.write(Self::Page),
+            7 => out.write(Self::Single),
+            value => {
+                return Err(D::Error::custom(format!(
+                    "unsupported document chunking mode {value}"
+                )))
+            }
         }
+        Ok(())
     }
 }
 
@@ -434,7 +467,7 @@ pub struct RagDocumentUpload {
     pub sentence_size: Option<u32>,
     pub parse_image: Option<bool>,
     pub callback_url: Option<String>,
-    pub callback_header: Map<String, Value>,
+    pub callback_header: Map,
     pub word_num_limit: Option<u64>,
     pub request_id: Option<String>,
 }
@@ -492,7 +525,7 @@ pub struct UrlDocument {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callback_url: Option<String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub callback_header: Map<String, Value>,
+    pub callback_header: Map,
 }
 
 impl UrlDocument {
@@ -557,7 +590,7 @@ pub struct ReEmbeddingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callback_url: Option<String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub callback_header: Map<String, Value>,
+    pub callback_header: Map,
 }
 
 pub type KnowledgeCreateResponse = RagResponse<KnowledgeCreated>;
@@ -700,7 +733,7 @@ impl ZhipuClient {
         if !request.custom_separator.is_empty() {
             form = form.text(
                 "custom_separator",
-                serde_json::to_string(&request.custom_separator)
+                nextjson::to_string(&request.custom_separator)
                     .map_err(|error| ValidationError::Serialization(error.to_string()))?,
             );
         }
@@ -716,7 +749,7 @@ impl ZhipuClient {
         if !request.callback_header.is_empty() {
             form = form.text(
                 "callback_header",
-                serde_json::to_string(&request.callback_header)
+                nextjson::to_string(&request.callback_header)
                     .map_err(|error| ValidationError::Serialization(error.to_string()))?,
             );
         }
@@ -940,11 +973,14 @@ mod tests {
     fn serializes_official_embedding_and_chunking_codes() {
         let request =
             KnowledgeCreateRequest::new("engineering", KnowledgeEmbeddingModel::Embedding3Pro);
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["embedding_id"], 12);
+        let value = nextjson::to_value(&request).unwrap();
+        assert_eq!(value["embedding_id"].as_u64(), Some(12));
 
         let url = UrlDocument::new("https://example.com/runbook", DocumentChunking::Heading);
-        assert_eq!(serde_json::to_value(url).unwrap()["knowledge_type"], 1);
+        assert_eq!(
+            nextjson::to_value(&url).unwrap()["knowledge_type"].as_u64(),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1003,28 +1039,29 @@ mod tests {
         assert!(validate_retrieval(&request).is_err());
 
         assert_eq!(
-            serde_json::from_str::<KnowledgeEmbeddingModel>("3").unwrap(),
+            nextjson::from_str::<KnowledgeEmbeddingModel>("3").unwrap(),
             KnowledgeEmbeddingModel::Embedding2
         );
         assert_eq!(
-            serde_json::from_str::<KnowledgeEmbeddingModel>("11").unwrap(),
+            nextjson::from_str::<KnowledgeEmbeddingModel>("11").unwrap(),
             KnowledgeEmbeddingModel::Embedding3
         );
-        assert!(serde_json::from_str::<KnowledgeEmbeddingModel>("99").is_err());
+        assert!(nextjson::from_str::<KnowledgeEmbeddingModel>("99").is_err());
         assert_eq!(
-            serde_json::from_str::<Contextualization>("0").unwrap(),
+            nextjson::from_str::<Contextualization>("0").unwrap(),
             Contextualization::Disabled
         );
         assert_eq!(
-            serde_json::from_str::<Contextualization>("1").unwrap(),
+            nextjson::from_str::<Contextualization>("1").unwrap(),
             Contextualization::Enabled
         );
-        assert!(serde_json::from_str::<Contextualization>("2").is_err());
+        assert!(nextjson::from_str::<Contextualization>("2").is_err());
         for value in [1, 2, 3, 5, 6, 7] {
-            let chunking = serde_json::from_value::<DocumentChunking>(value.into()).unwrap();
+            let chunking =
+                nextjson::from_value::<DocumentChunking>(nextjson::Value::from(value)).unwrap();
             assert_eq!(u64::from(chunking.code()), value);
         }
-        assert!(serde_json::from_str::<DocumentChunking>("4").is_err());
+        assert!(nextjson::from_str::<DocumentChunking>("4").is_err());
     }
 
     #[tokio::test]

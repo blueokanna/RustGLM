@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use nextjson::{Map, Value};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -129,8 +129,8 @@ pub struct RealtimeSession {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<RealtimeTool>,
     pub beta_fields: RealtimeBetaFields,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
-    pub extra: Map<String, Value>,
+    #[serde(flatten, default)]
+    pub extra: Map,
 }
 
 impl Default for RealtimeSession {
@@ -549,7 +549,7 @@ pub struct RealtimeServerEvent {
     #[serde(default)]
     pub client_timestamp: Option<u64>,
     #[serde(flatten, default)]
-    pub data: Map<String, Value>,
+    pub data: Map,
 }
 
 impl RealtimeServerEvent {
@@ -613,7 +613,7 @@ pub struct RealtimeSender {
 
 impl RealtimeSender {
     pub async fn send(&self, event: &RealtimeClientEvent) -> Result<()> {
-        let value = serde_json::to_string(event)
+        let value = nextjson::to_string(event)
             .map_err(|error| SdkError::Validation(error.to_string().into()))?;
         self.send_message(Message::Text(value.into())).await
     }
@@ -624,7 +624,7 @@ impl RealtimeSender {
     }
 
     pub async fn send_request(&self, event: &RealtimeRequest) -> Result<()> {
-        let value = serde_json::to_string(event)
+        let value = nextjson::to_string(event)
             .map_err(|error| SdkError::Validation(error.to_string().into()))?;
         self.send_message(Message::Text(value.into())).await
     }
@@ -796,7 +796,7 @@ fn spawn_connection(socket: RealtimeSocket, capacity: usize) -> RealtimeConnecti
                 },
                 message = stream.next() => match message {
                     Some(Ok(Message::Text(text))) => {
-                        let event = serde_json::from_str(&text).map_err(|error| {
+                        let event = nextjson::from_str(&text).map_err(|error| {
                             SdkError::Stream(format!("{error}: {text}").into())
                         });
                         if events_tx.send(event).await.is_err() {
@@ -804,7 +804,7 @@ fn spawn_connection(socket: RealtimeSocket, capacity: usize) -> RealtimeConnecti
                         }
                     }
                     Some(Ok(Message::Binary(bytes))) => {
-                        let event = serde_json::from_slice(&bytes).map_err(|error| {
+                        let event = nextjson::from_slice(&bytes).map_err(|error| {
                             SdkError::Stream(
                                 format!("{error}: {}", String::from_utf8_lossy(&bytes)).into(),
                             )
@@ -878,38 +878,50 @@ mod tests {
             .tool(RealtimeTool::function(
                 "weather",
                 "weather lookup",
-                serde_json::json!({"type":"object"}),
+                nextjson::json!({"type":"object"}),
             ));
         session.max_response_output_tokens = Some(RealtimeMaxTokens::Count(1024));
         let value =
-            serde_json::to_value(RealtimeClientEvent::session_update(session).unwrap()).unwrap();
-        assert_eq!(value["type"], "session.update");
+            nextjson::to_value(&RealtimeClientEvent::session_update(session).unwrap()).unwrap();
+        assert_eq!(value["type"].as_str(), Some("session.update"));
         assert_eq!(
-            value["session"]["beta_fields"]["chat_mode"],
-            "video_passive"
+            value["session"]["beta_fields"]["chat_mode"].as_str(),
+            Some("video_passive")
         );
-        assert_eq!(value["session"]["turn_detection"]["type"], "server_vad");
-        assert_eq!(value["session"]["tools"][0]["name"], "weather");
-        assert_eq!(value["session"]["max_output_tokens"], 1024);
+        assert_eq!(
+            value["session"]["turn_detection"]["type"].as_str(),
+            Some("server_vad")
+        );
+        assert_eq!(value["session"]["tools"][0]["name"].as_str(), Some("weather"));
+        assert_eq!(value["session"]["max_output_tokens"].as_u64(), Some(1024));
         assert!(value["session"].get("max_response_output_tokens").is_none());
 
         let audio =
-            serde_json::to_value(RealtimeClientEvent::append_audio(&[1, 2]).unwrap()).unwrap();
-        assert_eq!(audio["type"], "input_audio_buffer.append");
-        assert_eq!(audio["audio"], "AQI=");
+            nextjson::to_value(&RealtimeClientEvent::append_audio(&[1, 2]).unwrap()).unwrap();
+        assert_eq!(audio["type"].as_str(), Some("input_audio_buffer.append"));
+        assert_eq!(audio["audio"].as_str(), Some("AQI="));
         let frame =
-            serde_json::to_value(RealtimeClientEvent::append_video_frame(&[0xff, 0xd8]).unwrap())
+            nextjson::to_value(&RealtimeClientEvent::append_video_frame(&[0xff, 0xd8]).unwrap())
                 .unwrap();
-        assert_eq!(frame["type"], "input_audio_buffer.append_video_frame");
-        let transcription = serde_json::to_value(
+        assert_eq!(
+            frame["type"].as_str(),
+            Some("input_audio_buffer.append_video_frame")
+        );
+        let transcription = nextjson::to_value(&
             RealtimeClientEvent::transcription_session_update(
                 RealtimeTranscriptionSession::default(),
             )
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(transcription["type"], "transcription_session.update");
-        assert_eq!(transcription["session"]["input_audio_format"], "pcm");
+        assert_eq!(
+            transcription["type"].as_str(),
+            Some("transcription_session.update")
+        );
+        assert_eq!(
+            transcription["session"]["input_audio_format"].as_str(),
+            Some("pcm")
+        );
         let text_item = RealtimeConversationItem::text("user", "hello");
         assert_eq!(text_item.content[0].kind, "input_text");
         let output = RealtimeConversationItem::function_output("{\"ok\":true}");
@@ -923,7 +935,7 @@ mod tests {
             RealtimeClientEvent::create_response().unwrap(),
             RealtimeClientEvent::cancel_response().unwrap(),
         ] {
-            assert!(serde_json::to_value(event).unwrap()["type"].is_string());
+            assert!(nextjson::to_value(&event).unwrap()["type"].is_string());
         }
         assert!(RealtimeClientEvent::append_audio(&[]).is_err());
         assert!(RealtimeClientEvent::append_video_frame(&[]).is_err());
@@ -933,36 +945,36 @@ mod tests {
 
     #[test]
     fn decodes_server_event_helpers() {
-        let text: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let text: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"response.text.delta","delta":"hello"
         }))
         .unwrap();
         assert_eq!(text.delta_text(), Some("hello"));
-        let transcript: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let transcript: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"response.audio_transcript.delta","delta":"words"
         }))
         .unwrap();
         assert_eq!(transcript.delta_text(), Some("words"));
-        let audio: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let audio: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"response.audio.delta","delta":"AQI="
         }))
         .unwrap();
         assert_eq!(audio.audio_bytes().unwrap(), Some(vec![1, 2]));
-        let call: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let call: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"response.function_call_arguments.done","name":"weather","arguments":"{}"
         }))
         .unwrap();
         assert_eq!(call.function_call().unwrap().name, "weather");
-        let error: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let error: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"error","error":{"code":"bad"}
         }))
         .unwrap();
-        assert_eq!(error.error().unwrap()["code"], "bad");
+        assert_eq!(error.error().unwrap()["code"].as_str(), Some("bad"));
         assert!(text.audio_base64().is_none());
         assert!(text.audio_bytes().unwrap().is_none());
         assert!(text.error().is_none());
         assert!(text.function_call().is_none());
-        let invalid_audio: RealtimeServerEvent = serde_json::from_value(serde_json::json!({
+        let invalid_audio: RealtimeServerEvent = nextjson::from_value(nextjson::json!({
             "type":"response.audio.delta","delta":"%%%"
         }))
         .unwrap();
@@ -1020,7 +1032,7 @@ mod tests {
                 .unwrap();
             socket
                 .send(Message::Text(
-                    serde_json::json!({
+                    nextjson::json!({
                         "type":"session.created",
                         "session":{
                             "id":"session-1",
@@ -1037,15 +1049,15 @@ mod tests {
             let mut received = Vec::new();
             while received.len() < 14 {
                 if let Some(Ok(Message::Text(text))) = socket.next().await {
-                    let event: Value = serde_json::from_str(&text).unwrap();
+                    let event: Value = nextjson::from_str(&text).unwrap();
                     let kind = event["type"].as_str().unwrap().to_owned();
                     received.push(event);
                     if kind == "response.create" {
                         socket.send(Message::Ping(vec![1].into())).await.unwrap();
                         for event in [
-                            serde_json::json!({"type":"response.text.delta","delta":"hello"}),
-                            serde_json::json!({"type":"response.audio.delta","delta":"AQI="}),
-                            serde_json::json!({"type":"response.done","response":{"status":"completed"}}),
+                            nextjson::json!({"type":"response.text.delta","delta":"hello"}),
+                            nextjson::json!({"type":"response.audio.delta","delta":"AQI="}),
+                            nextjson::json!({"type":"response.done","response":{"status":"completed"}}),
                         ] {
                             socket
                                 .send(Message::Text(event.to_string().into()))
@@ -1102,7 +1114,7 @@ mod tests {
         sender.create_response().await.unwrap();
         sender.cancel_response().await.unwrap();
         sender
-            .send_json(&serde_json::json!({"type":"custom.event"}))
+            .send_json(&nextjson::json!({"type":"custom.event"}))
             .await
             .unwrap();
         let mut text = String::new();
@@ -1124,12 +1136,18 @@ mod tests {
         connection.close().await.unwrap();
         let received = server.await.unwrap();
         assert_eq!(authorization.lock().unwrap().as_str(), "Bearer test-key");
-        assert_eq!(received[0]["type"], "session.update");
-        assert_eq!(received[1]["type"], "session.update");
-        assert_eq!(received[7]["type"], "transcription_session.update");
-        assert_eq!(received[8]["type"], "conversation.item.create");
-        assert_eq!(received[11]["type"], "response.create");
-        assert_eq!(received[13]["type"], "custom.event");
+        assert_eq!(received[0]["type"].as_str(), Some("session.update"));
+        assert_eq!(received[1]["type"].as_str(), Some("session.update"));
+        assert_eq!(
+            received[7]["type"].as_str(),
+            Some("transcription_session.update")
+        );
+        assert_eq!(
+            received[8]["type"].as_str(),
+            Some("conversation.item.create")
+        );
+        assert_eq!(received[11]["type"].as_str(), Some("response.create"));
+        assert_eq!(received[13]["type"].as_str(), Some("custom.event"));
     }
 
     #[tokio::test]
@@ -1159,7 +1177,7 @@ mod tests {
             let RealtimeCommand::Send(Message::Text(text)) = receiver.recv().await.unwrap() else {
                 panic!("expected text command");
             };
-            let value: Value = serde_json::from_str(&text).unwrap();
+            let value: Value = nextjson::from_str(&text).unwrap();
             kinds.push(value["type"].as_str().unwrap().to_owned());
         }
         assert_eq!(

@@ -5,7 +5,7 @@ use rustglm::{ChatCompletionRequest, ChatMessage, ResponseContent, ZhipuClient};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = std::env::var("ZHIPU_API_KEY")?;
     let client = ZhipuClient::new(api_key)?;
-    let request = ChatCompletionRequest::new("glm-5.2")
+    let request = ChatCompletionRequest::new("glm-5.3")
         .message(ChatMessage::system("Answer concisely."))
         .message(ChatMessage::user(
             "Explain Rust ownership in one paragraph.",

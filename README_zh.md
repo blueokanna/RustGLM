@@ -34,7 +34,7 @@ use rustglm::{ChatCompletionRequest, ChatMessage, ZhipuClient};
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("key_id.secret")?;
-let request = ChatCompletionRequest::new("glm-5.2")
+let request = ChatCompletionRequest::new("glm-5.3")
     .message(ChatMessage::user("用一段话解释 Rust 所有权。"));
 let response = client.chat_completion(&request).await?;
 println!("{}", response.text().unwrap_or_default());
@@ -125,11 +125,11 @@ rustglm = { version = "1.0.0", features = ["full"] }
 标记类型、封闭能力 trait 和请求 typestate 会阻止通过强类型 API 发送不支持的操作。请求在包含用户或工具输入前，无法传给强类型补全方法。
 
 ```rust,no_run
-use rustglm::{Glm52, ReasoningEffort, Thinking, TypedChatRequest, ZhipuClient};
+use rustglm::{Glm53, ReasoningEffort, Thinking, TypedChatRequest, ZhipuClient};
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("key_id.secret")?;
-let request = TypedChatRequest::<Glm52>::new()
+let request = TypedChatRequest::<Glm53>::new()
     .system("Answer with evidence.")
     .thinking(Thinking::enabled())
     .reasoning_effort(ReasoningEffort::High)
@@ -146,6 +146,7 @@ println!("{}", response.text().unwrap_or_default());
 
 | 文本模型 | 标记类型 | Thinking | Reasoning effort | ToolStream |
 | --- | --- | :---: | :---: | :---: |
+| `glm-5.3` | `Glm53` | 是 | 是 | 是 |
 | `glm-5.2` | `Glm52` | 是 | 是 | 是 |
 | `glm-5.1` | `Glm51` | 是 | 否 | 是 |
 | `glm-5.1-highspeed` | `Glm51Highspeed` | 是 | 否 | 是 |
@@ -182,11 +183,11 @@ ToolStream 将碎片化 SSE 函数调用增量合并为完整的强类型调用�
 
 ```rust,no_run
 use futures_util::StreamExt;
-use rustglm::{Glm52, ToolStreamEvent, TypedChatRequest, ZhipuClient};
+use rustglm::{Glm53, ToolStreamEvent, TypedChatRequest, ZhipuClient};
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("token")?;
-let request = TypedChatRequest::<Glm52>::new().tool_stream().user("Check the deployment status.");
+let request = TypedChatRequest::<Glm53>::new().tool_stream().user("Check the deployment status.");
 let mut stream = client.typed_chat_tool_stream(&request).await?;
 while let Some(event) = stream.next().await {
     if let ToolStreamEvent::ToolCallCompleted(call) = event? {
@@ -298,7 +299,7 @@ fn classify(error: SdkError) {
 
 ## API 覆盖范围
 
-下表是公开 SDK 操作的索引，依据公开客户端接口整理，而非假定服务商能力。接受 `serde_json::Value` 的方法有意保留与快速变化的服务商 Schema 的兼容性。
+下表是公开 SDK 操作的索引，依据公开客户端接口整理，而非假定服务商能力。接受 `nextjson::Value` 的方法有意保留与快速变化的服务商 Schema 的兼容性。
 
 | 能力领域 | Feature | 公开方法 |
 | --- | --- | --- |

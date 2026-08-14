@@ -1,5 +1,5 @@
 use rustglm::{ChatCompletionRequest, ChatMessage, FunctionDefinition, Tool, ZhipuClient};
-use serde_json::json;
+use nextjson::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .description("Return the current weather for a city")
     .strict(true);
-    let request = ChatCompletionRequest::new("glm-5.2")
+    let request = ChatCompletionRequest::new("glm-5.3")
         .message(ChatMessage::user("What is the weather in Shanghai?"))
         .tools(vec![Tool::function(weather)]);
     let response = client.chat_completion(&request).await?;

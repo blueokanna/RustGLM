@@ -1,18 +1,21 @@
 use std::marker::PhantomData;
 
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use nextjson::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
-pub type ExtraFields = Map<String, Value>;
+use crate::wire_enum;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    System,
-    Developer,
-    User,
-    Assistant,
-    Tool,
+pub type ExtraFields = Map;
+
+wire_enum! {
+    /// The role of a chat message.
+    pub enum MessageRole {
+        System => "system",
+        Developer => "developer",
+        User => "user",
+        Assistant => "assistant",
+        Tool => "tool",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,7 +92,7 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -195,7 +198,7 @@ impl FunctionDefinition {
 /// Implementations remain open to downstream crates; model capability traits are sealed, while
 /// application-owned tools must be extensible.
 pub trait FunctionSpec: Send + Sync + 'static {
-    type Arguments: serde::de::DeserializeOwned;
+    type Arguments: for<'de> Deserialize<'de>;
     type Output: Serialize;
 
     const NAME: &'static str;
@@ -240,48 +243,48 @@ impl<S: FunctionSpec> TypedFunction<S> {
         call_id: impl Into<String>,
         output: &S::Output,
     ) -> crate::Result<ChatMessage> {
-        let output = serde_json::to_string(output).map_err(|error| {
+        let output = nextjson::to_string(output).map_err(|error| {
             crate::SdkError::Tool(format!("cannot encode {} output: {error}", S::NAME).into())
         })?;
         Ok(ChatMessage::tool_result(call_id, output))
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum WebSearchEngine {
-    SearchStd,
-    SearchPro,
-    SearchProSogou,
-    SearchProQuark,
+wire_enum! {
+    /// Hosted web search engine.
+    pub enum WebSearchEngine {
+        SearchStd => "search_std",
+        SearchPro => "search_pro",
+        SearchProSogou => "search_pro_sogou",
+        SearchProQuark => "search_pro_quark",
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum WebSearchRecency {
-    #[serde(rename = "oneDay")]
-    OneDay,
-    #[serde(rename = "oneWeek")]
-    OneWeek,
-    #[serde(rename = "oneMonth")]
-    OneMonth,
-    #[serde(rename = "oneYear")]
-    OneYear,
-    #[serde(rename = "noLimit")]
-    NoLimit,
+wire_enum! {
+    /// Web search result recency window.
+    pub enum WebSearchRecency {
+        OneDay => "oneDay",
+        OneWeek => "oneWeek",
+        OneMonth => "oneMonth",
+        OneYear => "oneYear",
+        NoLimit => "noLimit",
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WebSearchContentSize {
-    Medium,
-    High,
+wire_enum! {
+    /// Web search result content size.
+    pub enum WebSearchContentSize {
+        Medium => "medium",
+        High => "high",
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum WebSearchResultSequence {
-    Before,
-    After,
+wire_enum! {
+    /// Web search result ordering.
+    pub enum WebSearchResultSequence {
+        Before => "before",
+        After => "after",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -378,7 +381,7 @@ pub struct McpTool {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
-    pub headers: Map<String, Value>,
+    pub headers: Map,
 }
 
 impl McpTool {
@@ -406,7 +409,7 @@ impl Tool {
         let mut definition = Map::new();
         definition.insert(
             "function".into(),
-            serde_json::to_value(value).unwrap_or(Value::Null),
+            nextjson::to_value(&value).unwrap_or(Value::Null),
         );
         Self {
             kind: "function".into(),
@@ -427,7 +430,7 @@ impl Tool {
         Self::configured(
             "web_search",
             "web_search",
-            serde_json::to_value(value).unwrap_or(Value::Null),
+            nextjson::to_value(&value).unwrap_or(Value::Null),
         )
     }
 
@@ -435,7 +438,7 @@ impl Tool {
         Self::configured(
             "retrieval",
             "retrieval",
-            serde_json::to_value(value).unwrap_or(Value::Null),
+            nextjson::to_value(&value).unwrap_or(Value::Null),
         )
     }
 
@@ -443,7 +446,7 @@ impl Tool {
         Self::configured(
             "mcp",
             "mcp",
-            serde_json::to_value(value).unwrap_or(Value::Null),
+            nextjson::to_value(&value).unwrap_or(Value::Null),
         )
     }
 }
@@ -455,7 +458,7 @@ pub struct ToolCall {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<FunctionCall>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -466,8 +469,8 @@ pub struct FunctionCall {
 }
 
 impl FunctionCall {
-    pub fn arguments<T: serde::de::DeserializeOwned>(&self) -> serde_json::Result<T> {
-        serde_json::from_str(&self.arguments)
+    pub fn arguments<T: for<'de> Deserialize<'de>>(&self) -> nextjson::Result<T> {
+        nextjson::from_str(&self.arguments)
     }
 }
 
@@ -487,11 +490,12 @@ pub struct ToolChoiceFunction {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ThinkingType {
-    Enabled,
-    Disabled,
+wire_enum! {
+    /// Whether thinking is enabled for a request.
+    pub enum ThinkingType {
+        Enabled => "enabled",
+        Disabled => "disabled",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -523,23 +527,25 @@ impl Thinking {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ReasoningEffort {
-    Max,
-    Xhigh,
-    High,
-    Medium,
-    Low,
-    Minimal,
-    None,
+wire_enum! {
+    /// Reasoning effort level.
+    pub enum ReasoningEffort {
+        Max => "max",
+        Xhigh => "xhigh",
+        High => "high",
+        Medium => "medium",
+        Low => "low",
+        Minimal => "minimal",
+        None => "none",
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ResponseFormatType {
-    Text,
-    JsonObject,
+wire_enum! {
+    /// Response format kind.
+    pub enum ResponseFormatType {
+        Text => "text",
+        JsonObject => "json_object",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -580,7 +586,7 @@ pub struct ChatCompletionRequest {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -646,8 +652,8 @@ impl ChatCompletionRequest {
         mut self,
         key: impl Into<String>,
         value: impl Serialize,
-    ) -> serde_json::Result<Self> {
-        self.extra.insert(key.into(), serde_json::to_value(value)?);
+    ) -> nextjson::Result<Self> {
+        self.extra.insert(key.into(), nextjson::to_value(&value)?);
         Ok(self)
     }
 }
@@ -875,7 +881,7 @@ pub struct EmbeddingRequest {
     pub user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -964,7 +970,7 @@ pub struct ImageGenerationRequest {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -1038,7 +1044,7 @@ pub struct VideoGenerationRequest {
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -1252,7 +1258,7 @@ pub struct SpeechRequest {
     pub response_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark_enabled: Option<bool>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -1410,27 +1416,41 @@ pub struct DeleteResponse {
     pub deleted: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum BatchCompletionWindow {
-    #[default]
-    #[serde(rename = "24h")]
-    TwentyFourHours,
+wire_enum! {
+    /// Batch completion window.
+    pub enum BatchCompletionWindow {
+        TwentyFourHours => "24h",
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum BatchStatus {
-    Validating,
-    InProgress,
-    Finalizing,
-    Completed,
-    Failed,
-    Expired,
-    Cancelling,
-    Cancelled,
-    #[default]
-    #[serde(other)]
-    Unknown,
+#[allow(clippy::derivable_impls)]
+impl Default for BatchCompletionWindow {
+    fn default() -> Self {
+        Self::TwentyFourHours
+    }
+}
+
+wire_enum! {
+    /// Batch task status.
+    pub enum BatchStatus {
+        Validating => "validating",
+        InProgress => "in_progress",
+        Finalizing => "finalizing",
+        Completed => "completed",
+        Failed => "failed",
+        Expired => "expired",
+        Cancelling => "cancelling",
+        Cancelled => "cancelled",
+        Unknown => "unknown",
+        ; _ => Unknown
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for BatchStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -1498,8 +1518,8 @@ fn is_false(value: &bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Deserialize, Serialize};
-    use serde_json::json;
+    use nextjson::json;
+    use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
     #[test]
     fn content_part_constructors_cover_all_modalities() {
@@ -1510,12 +1530,12 @@ mod tests {
             ContentPart::file_url("https://example.com/file.pdf"),
             ContentPart::input_audio("base64", "wav"),
         ];
-        let value = serde_json::to_value(parts).unwrap();
-        assert_eq!(value[0]["type"], "text");
-        assert_eq!(value[1]["type"], "image_url");
-        assert_eq!(value[2]["type"], "video_url");
-        assert_eq!(value[3]["type"], "file_url");
-        assert_eq!(value[4]["type"], "input_audio");
+        let value = nextjson::to_value(&parts).unwrap();
+        assert_eq!(value[0]["type"].as_str(), Some("text"));
+        assert_eq!(value[1]["type"].as_str(), Some("image_url"));
+        assert_eq!(value[2]["type"].as_str(), Some("video_url"));
+        assert_eq!(value[3]["type"].as_str(), Some("file_url"));
+        assert_eq!(value[4]["type"].as_str(), Some("input_audio"));
     }
 
     #[test]
@@ -1554,7 +1574,7 @@ mod tests {
         assert_eq!(request.reasoning_effort, Some(ReasoningEffort::High));
         assert_eq!(request.tool_stream, Some(true));
         assert_eq!(request.request_id.as_deref(), Some("request-id"));
-        assert_eq!(request.extra["custom"], 7);
+        assert_eq!(request.extra["custom"].as_u64(), Some(7));
     }
 
     #[test]
@@ -1562,8 +1582,8 @@ mod tests {
         let function =
             FunctionDefinition::new("lookup", json!({"type":"object"})).description("lookup data");
         let tool = Tool::function(function);
-        let value = serde_json::to_value(tool).unwrap();
-        assert_eq!(value["function"]["description"], "lookup data");
+        let value = nextjson::to_value(&tool).unwrap();
+        assert_eq!(value["function"]["description"].as_str(), Some("lookup data"));
         let choice = ToolChoice::Function {
             kind: "function".into(),
             function: ToolChoiceFunction {
@@ -1571,8 +1591,8 @@ mod tests {
             },
         };
         assert_eq!(
-            serde_json::to_value(choice).unwrap()["function"]["name"],
-            "lookup"
+            nextjson::to_value(&choice).unwrap()["function"]["name"].as_str(),
+            Some("lookup")
         );
     }
 
@@ -1624,9 +1644,9 @@ mod tests {
     #[test]
     fn typed_function_binds_arguments_output_and_wire_definition() {
         let function = TypedFunction::<Weather>::new();
-        let tool = serde_json::to_value(function.tool()).unwrap();
-        assert_eq!(tool["type"], "function");
-        assert_eq!(tool["function"]["name"], "weather");
+        let tool = nextjson::to_value(&function.tool()).unwrap();
+        assert_eq!(tool["type"].as_str(), Some("function"));
+        assert_eq!(tool["function"]["name"].as_str(), Some("weather"));
 
         let call = FunctionCall {
             name: "weather".into(),
@@ -1655,13 +1675,19 @@ mod tests {
         let mcp = Tool::mcp(McpTool::new("server-1"));
         let values = [search, retrieval, mcp]
             .into_iter()
-            .map(|tool| serde_json::to_value(tool).unwrap())
+            .map(|tool| nextjson::to_value(&tool).unwrap())
             .collect::<Vec<_>>();
 
-        assert_eq!(values[0]["web_search"]["search_engine"], "search_pro");
-        assert_eq!(values[0]["web_search"]["count"], 20);
-        assert_eq!(values[1]["retrieval"]["knowledge_id"], "knowledge-1");
-        assert_eq!(values[2]["mcp"]["server_label"], "server-1");
+        assert_eq!(
+            values[0]["web_search"]["search_engine"].as_str(),
+            Some("search_pro")
+        );
+        assert_eq!(values[0]["web_search"]["count"].as_u64(), Some(20));
+        assert_eq!(
+            values[1]["retrieval"]["knowledge_id"].as_str(),
+            Some("knowledge-1")
+        );
+        assert_eq!(values[2]["mcp"]["server_label"].as_str(), Some("server-1"));
         assert!(
             WebSearchTool::new(WebSearchEngine::SearchStd)
                 .count(0)
@@ -1680,7 +1706,7 @@ mod tests {
         assert_eq!(text.as_text(), Some("answer"));
         assert_eq!(parts.as_text(), None);
         assert_eq!(ChatCompletionResponse::default().text(), None);
-        let response: ChatCompletionResponse = serde_json::from_value(json!({
+        let response: ChatCompletionResponse = nextjson::from_value(json!({
             "choices":[{"index":0,"message":{"content":"answer"}}]
         }))
         .unwrap();
@@ -1690,12 +1716,12 @@ mod tests {
     #[test]
     fn thinking_constructors_match_wire_values() {
         assert_eq!(
-            serde_json::to_value(Thinking::enabled()).unwrap()["type"],
-            "enabled"
+            nextjson::to_value(&Thinking::enabled()).unwrap()["type"].as_str(),
+            Some("enabled")
         );
         assert_eq!(
-            serde_json::to_value(Thinking::disabled()).unwrap()["type"],
-            "disabled"
+            nextjson::to_value(&Thinking::disabled()).unwrap()["type"].as_str(),
+            Some("disabled")
         );
     }
 

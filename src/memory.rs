@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
 use crate::{
     ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatProvider, EmbeddingInput,
@@ -152,12 +152,12 @@ impl InMemoryVectorStore {
     }
 
     pub fn snapshot_json(&self) -> Result<String> {
-        serde_json::to_string(&self.snapshot()?)
+        nextjson::to_string(&self.snapshot()?)
             .map_err(|error| SdkError::Configuration(error.to_string().into()))
     }
 
     pub fn restore_json(&self, value: &str) -> Result<()> {
-        let records = serde_json::from_str(value)
+        let records = nextjson::from_str(value)
             .map_err(|error| SdkError::Configuration(error.to_string().into()))?;
         self.restore(records)
     }
@@ -448,7 +448,7 @@ impl Conversation {
                     .collect::<Vec<_>>();
                 messages.push(ChatMessage::system(format!(
                     "Relevant prior conversation context:\n{}",
-                    serde_json::to_string(&context)
+                    nextjson::to_string(&context)
                         .map_err(|error| SdkError::Validation(error.to_string().into()))?
                 )));
             }
@@ -508,7 +508,7 @@ mod tests {
     use std::sync::Mutex;
 
     use futures_util::Stream;
-    use serde_json::json;
+    use nextjson::json;
 
     use super::*;
     use crate::{ChatCompletionChunk, ChatStream, ProviderCapabilities};
@@ -553,7 +553,7 @@ mod tests {
                 requests.push(request);
                 requests.len()
             };
-            Ok(serde_json::from_value(json!({
+            Ok(nextjson::from_value(json!({
                 "choices":[{"message":{"content":format!("answer-{index}")}}]
             }))
             .unwrap())
@@ -703,7 +703,7 @@ mod tests {
         let requests = semantic_requests.lock().unwrap();
         assert_eq!(requests[1].messages.len(), 2);
         assert!(
-            serde_json::to_string(&requests[1].messages[0])
+            nextjson::to_string(&requests[1].messages[0])
                 .unwrap()
                 .contains("Rust first")
         );

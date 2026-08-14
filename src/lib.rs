@@ -11,10 +11,12 @@ mod provider;
 mod rag;
 #[cfg(feature = "realtime")]
 mod realtime;
+mod sse;
 #[cfg(feature = "tools")]
 mod tool_stream;
 mod transport;
 mod types;
+mod wire_enum;
 #[cfg(feature = "audio")]
 mod voice;
 
@@ -23,6 +25,8 @@ pub mod client;
 #[cfg(any(feature = "agents", feature = "rag"))]
 pub use agent::*;
 pub use auth::{JwtAuthentication, ZhipuAuthentication};
+pub use bytes::Bytes;
+pub use nextjson::{NsonDeserialize, NsonSerialize};
 pub use client::{OpenAiCompatibleClient, OpenAiCompatibleConfig, ZhipuClient, ZhipuConfig};
 pub use error::*;
 #[cfg(feature = "mcp")]

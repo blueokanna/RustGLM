@@ -1,5 +1,5 @@
 use rustglm::ZhipuClient;
-use serde_json::json;
+use nextjson::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

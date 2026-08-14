@@ -34,7 +34,7 @@ use rustglm::{ChatCompletionRequest, ChatMessage, ZhipuClient};
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("key_id.secret")?;
-let request = ChatCompletionRequest::new("glm-5.2")
+let request = ChatCompletionRequest::new("glm-5.3")
     .message(ChatMessage::user("Explain ownership in one paragraph."));
 let response = client.chat_completion(&request).await?;
 println!("{}", response.text().unwrap_or_default());
@@ -126,12 +126,12 @@ Marker types, sealed capability traits, and request typestate prevent unsupporte
 
 ```rust,no_run
 use rustglm::{
-    Glm52, ReasoningEffort, Thinking, TypedChatRequest, ZhipuClient,
+    Glm53, ReasoningEffort, Thinking, TypedChatRequest, ZhipuClient,
 };
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("key_id.secret")?;
-let request = TypedChatRequest::<Glm52>::new()
+let request = TypedChatRequest::<Glm53>::new()
     .system("Answer with evidence.")
     .thinking(Thinking::enabled())
     .reasoning_effort(ReasoningEffort::High)
@@ -149,6 +149,7 @@ The table describes the compile-time typed API. Raw `ChatCompletionRequest` rema
 
 | Text model | Marker | Thinking | Reasoning effort | ToolStream |
 | --- | --- | :---: | :---: | :---: |
+| `glm-5.3` | `Glm53` | yes | yes | yes |
 | `glm-5.2` | `Glm52` | yes | yes | yes |
 | `glm-5.1` | `Glm51` | yes | no | yes |
 | `glm-5.1-highspeed` | `Glm51Highspeed` | yes | no | yes |
@@ -185,11 +186,11 @@ ToolStream combines fragmented SSE function-call deltas into complete typed call
 
 ```rust,no_run
 use futures_util::StreamExt;
-use rustglm::{Glm52, ToolStreamEvent, TypedChatRequest, ZhipuClient};
+use rustglm::{Glm53, ToolStreamEvent, TypedChatRequest, ZhipuClient};
 
 # async fn run() -> rustglm::Result<()> {
 let client = ZhipuClient::new("token")?;
-let request = TypedChatRequest::<Glm52>::new()
+let request = TypedChatRequest::<Glm53>::new()
     .tool_stream()
     .user("Check the deployment status.");
 let mut stream = client.typed_chat_tool_stream(&request).await?;
@@ -369,7 +370,7 @@ Retries are disabled by default. Enabling `RetryPolicy` is an explicit applicati
 
 ## API coverage
 
-The following table is an index of the public SDK operations. It is generated from the public client surface, not from an assumed provider feature set. Methods accepting `serde_json::Value` intentionally preserve compatibility with provider schemas that evolve faster than this crate.
+The following table is an index of the public SDK operations. It is generated from the public client surface, not from an assumed provider feature set. Methods accepting `nextjson::Value` intentionally preserve compatibility with provider schemas that evolve faster than this crate.
 
 | Area | Feature | Public operations |
 | --- | --- | --- |

@@ -73,6 +73,7 @@ const fn vision_capabilities(thinking: bool) -> ModelCapabilities {
     }
 }
 
+model_marker!(Glm53, "glm-5.3", text_capabilities(true, true, true));
 model_marker!(Glm52, "glm-5.2", text_capabilities(true, true, true));
 model_marker!(Glm51, "glm-5.1", text_capabilities(true, false, true));
 model_marker!(
@@ -162,6 +163,7 @@ macro_rules! impl_tool_stream {
 }
 
 impl_text!(
+    Glm53,
     Glm52,
     Glm51,
     Glm51Highspeed,
@@ -188,6 +190,7 @@ impl_vision!(
     Glm41vThinkingFlashX,
 );
 impl_thinking!(
+    Glm53,
     Glm52,
     Glm51,
     Glm51Highspeed,
@@ -207,8 +210,10 @@ impl_thinking!(
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
 );
+impl SupportsReasoningEffort for Glm53 {}
 impl SupportsReasoningEffort for Glm52 {}
 impl_tools!(
+    Glm53,
     Glm52,
     Glm51,
     Glm51Highspeed,
@@ -232,7 +237,7 @@ impl_tools!(
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
 );
-impl_tool_stream!(Glm52, Glm51, Glm51Highspeed, Glm5Turbo, Glm5, Glm47, Glm46);
+impl_tool_stream!(Glm53, Glm52, Glm51, Glm51Highspeed, Glm5Turbo, Glm5, Glm47, Glm46);
 
 mod request_state {
     pub trait Sealed {}
@@ -359,7 +364,7 @@ impl<M: SupportsThinking, S: request_state::Sealed> TypedChatRequest<M, S> {
 }
 
 impl<M: SupportsReasoningEffort, S: request_state::Sealed> TypedChatRequest<M, S> {
-    /// Sets GLM-5.2 reasoning effort.
+    /// Sets GLM-5.3 (or GLM-5.2) reasoning effort.
     ///
     /// This method does not exist for models that do not declare the capability:
     ///
@@ -423,6 +428,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn typed_glm53_request_sets_capability_checked_fields() {
+        let request = TypedChatRequest::<Glm53>::new()
+            .system("be precise")
+            .thinking(Thinking::enabled())
+            .reasoning_effort(ReasoningEffort::Max)
+            .tool_stream()
+            .user("hello");
+
+        assert_eq!(request.model_id(), "glm-5.3");
+        assert_eq!(request.as_raw().model, "glm-5.3");
+        assert_eq!(request.as_raw().messages.len(), 2);
+        assert_eq!(request.as_raw().tool_stream, Some(true));
+        assert!(request.capabilities().reasoning_effort);
+        assert!(request.capabilities().tools);
+        assert!(!request.capabilities().vision);
+    }
+
+    #[test]
     fn typed_glm52_request_sets_capability_checked_fields() {
         let request = TypedChatRequest::<Glm52>::new()
             .system("be precise")
@@ -459,6 +482,7 @@ mod tests {
     #[test]
     fn every_official_marker_has_the_expected_wire_id() {
         let models = [
+            model_descriptor::<Glm53>(),
             model_descriptor::<Glm52>(),
             model_descriptor::<Glm51>(),
             model_descriptor::<Glm51Highspeed>(),
@@ -486,6 +510,7 @@ mod tests {
         assert_eq!(
             ids,
             [
+                "glm-5.3",
                 "glm-5.2",
                 "glm-5.1",
                 "glm-5.1-highspeed",
@@ -511,15 +536,17 @@ mod tests {
             ]
         );
         assert!(models[0].1.reasoning_effort);
+        assert!(models[0].1.tool_stream);
+        assert!(models[1].1.reasoning_effort);
         assert!(models[1].1.tool_stream);
-        assert!(models[14].1.vision);
-        assert!(!models[14].1.tool_stream);
+        assert!(models[15].1.vision);
+        assert!(!models[15].1.tool_stream);
         assert!(!model_descriptor::<Glm47Flash>().1.tool_stream);
     }
 
     #[test]
     fn typed_builder_covers_common_tool_and_transition_paths() {
-        let tool = Tool::configured("web_search", "web_search", serde_json::json!({}));
+        let tool = Tool::configured("web_search", "web_search", nextjson::json!({}));
         let request = TypedChatRequest::<Glm52>::new()
             .system("system")
             .assistant("assistant")

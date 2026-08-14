@@ -1,5 +1,5 @@
 use rustglm::McpClientConfig;
-use serde_json::Map;
+use nextjson::Map;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .ok_or("mcp_client <endpoint> call <tool> [json]")?;
             let arguments = args
                 .next()
-                .map(|raw| serde_json::from_str::<Map<String, serde_json::Value>>(&raw))
+                .map(|raw| nextjson::from_str::<Map>(&raw))
                 .transpose()?;
             println!("{:#?}", client.call_tool(name, arguments).await?);
         }

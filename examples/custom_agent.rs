@@ -6,7 +6,7 @@ use rustglm::{
     AgentHistoryPolicy, AgentManifest, AgentPersona, AgentRuntime, AgentTool, FunctionDefinition,
     Result as SdkResult, ZhipuClient,
 };
-use serde_json::{Value, json};
+use nextjson::{Value, json};
 
 struct DeviceInfoTool;
 

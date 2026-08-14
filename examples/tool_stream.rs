@@ -1,9 +1,9 @@
 use futures_util::StreamExt;
 use rustglm::{
-    FunctionDefinition, Glm52, ResponseContent, Tool, ToolStreamEvent, TypedChatRequest,
+    FunctionDefinition, Glm53, ResponseContent, Tool, ToolStreamEvent, TypedChatRequest,
     ZhipuClient,
 };
-use serde_json::json;
+use nextjson::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +18,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .description("Read the current deployment status"),
     );
-    let request = TypedChatRequest::<Glm52>::new()
+    let request = TypedChatRequest::<Glm53>::new()
         .tool(tool)
         .tool_stream()
         .user("Check the deployment status of payments-api.");

@@ -4,36 +4,23 @@ use std::task::{Context, Poll};
 
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+
+use crate::wire_enum;
 
 use crate::{
     ChatStream, FunctionCallDelta, ResponseContent, Result, SdkError, ToolCallDelta, Usage,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FinishReason {
-    Stop,
-    Length,
-    ToolCalls,
-    Sensitive,
-    NetworkError,
-    ModelContextWindowExceeded,
-    #[serde(untagged)]
-    Other(String),
-}
-
-impl From<String> for FinishReason {
-    fn from(value: String) -> Self {
-        match value.as_str() {
-            "stop" => Self::Stop,
-            "length" => Self::Length,
-            "tool_calls" => Self::ToolCalls,
-            "sensitive" => Self::Sensitive,
-            "network_error" => Self::NetworkError,
-            "model_context_window_exceeded" => Self::ModelContextWindowExceeded,
-            _ => Self::Other(value),
-        }
+wire_enum! {
+    /// Stream completion reason.
+    pub enum FinishReason {
+        Stop => "stop",
+        Length => "length",
+        ToolCalls => "tool_calls",
+        Sensitive => "sensitive",
+        NetworkError => "network_error",
+        ModelContextWindowExceeded => "model_context_window_exceeded",
     }
 }
 
@@ -56,8 +43,8 @@ pub struct CompletedToolCall {
 }
 
 impl CompletedToolCall {
-    pub fn arguments<T: serde::de::DeserializeOwned>(&self) -> serde_json::Result<T> {
-        serde_json::from_str(&self.arguments)
+    pub fn arguments<T: for<'de> Deserialize<'de>>(&self) -> nextjson::Result<T> {
+        nextjson::from_str(&self.arguments)
     }
 }
 
@@ -204,11 +191,10 @@ pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
                         .copied()
                         .collect::<Vec<_>>();
                     for key @ (choice_index, tool_index) in keys {
-                        let call = calls
-                            .remove(&key)
-                            .expect("tool call key was collected from the same map")
-                            .complete(choice_index, tool_index)?;
-                        events.push(ToolStreamEvent::ToolCallCompleted(call));
+                        if let Some(call) = calls.remove(&key) {
+                            let call = call.complete(choice_index, tool_index)?;
+                            events.push(ToolStreamEvent::ToolCallCompleted(call));
+                        }
                     }
                     events.push(ToolStreamEvent::ChoiceCompleted {
                         choice_index,
@@ -240,7 +226,7 @@ pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
 #[cfg(test)]
 mod tests {
     use futures_util::{StreamExt, stream};
-    use serde::Deserialize;
+    use nextjson::NsonDeserialize as Deserialize;
 
     use super::*;
     use crate::{ChatChunkChoice, ChatCompletionChunk, ChatDelta};

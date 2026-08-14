@@ -1,68 +1,16 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use nextjson::{Map, Value};
+
+use crate::wire_enum;
 
 use super::{
     RealtimeEventMetadata, RealtimeMaxTokens, RealtimeServerEvent, RealtimeTranscriptionSession,
 };
 use crate::{Result, SdkError};
 
-macro_rules! string_enum {
-    ($(#[$meta:meta])* pub enum $name:ident { $($variant:ident => $value:literal),+ $(,)? }) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $($variant,)+
-            Other(String),
-        }
-
-        impl $name {
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $(Self::$variant => $value,)+
-                    Self::Other(value) => value,
-                }
-            }
-        }
-
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
-                match value {
-                    $($value => Self::$variant,)+
-                    value => Self::Other(value.to_owned()),
-                }
-            }
-        }
-
-        impl From<String> for $name {
-            fn from(value: String) -> Self {
-                Self::from(value.as_str())
-            }
-        }
-
-        impl Serialize for $name {
-            fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                serializer.serialize_str(self.as_str())
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                String::deserialize(deserializer).map(Self::from)
-            }
-        }
-    };
-}
-
-string_enum! {
+wire_enum! {
     /// Model identifiers documented by the current Realtime API.
     pub enum RealtimeModel {
         GlmRealtime => "glm-realtime",
@@ -78,14 +26,14 @@ impl Default for RealtimeModel {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeModality {
         Text => "text",
         Audio => "audio"
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeAudioFormat {
         Wav => "wav",
         Mp3 => "mp3",
@@ -95,7 +43,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeChatMode {
         Audio => "audio",
         VideoPassive => "video_passive",
@@ -103,7 +51,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeTtsSource {
         Zhipu => "zhipu",
         Huoshan => "huoshan",
@@ -111,7 +59,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeRole {
         System => "system",
         User => "user",
@@ -119,7 +67,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeItemStatus {
         InProgress => "in_progress",
         Completed => "completed",
@@ -127,7 +75,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeResponseStatus {
         InProgress => "in_progress",
         Completed => "completed",
@@ -137,7 +85,7 @@ string_enum! {
     }
 }
 
-string_enum! {
+wire_enum! {
     pub enum RealtimeToolChoiceMode {
         Auto => "auto",
         None => "none",
@@ -188,10 +136,11 @@ pub struct TypedRealtimeTool {
     pub parameters: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum RealtimeFunctionToolKind {
-    Function,
+wire_enum! {
+    /// Real-time function tool kind.
+    pub enum RealtimeFunctionToolKind {
+        Function => "function",
+    }
 }
 
 impl TypedRealtimeTool {
@@ -279,8 +228,8 @@ pub struct TypedRealtimeSession {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<RealtimeMaxTokens>,
     pub beta_fields: TypedRealtimeBetaFields,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
-    pub extra: Map<String, Value>,
+    #[serde(flatten, default)]
+    pub extra: Map,
 }
 
 impl Default for TypedRealtimeSession {
@@ -710,7 +659,7 @@ pub struct RealtimeSessionState {
     #[serde(default)]
     pub beta_fields: Option<TypedRealtimeBetaFields>,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -727,7 +676,7 @@ pub struct RealtimeErrorDetail {
     #[serde(default)]
     pub event_id: Option<String>,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -767,7 +716,7 @@ pub struct RealtimeResponse {
     #[serde(default)]
     pub usage: Option<RealtimeUsage>,
     #[serde(flatten, default)]
-    pub extra: Map<String, Value>,
+    pub extra: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -801,8 +750,8 @@ pub struct RealtimeFunctionCallDone {
 }
 
 impl RealtimeFunctionCallDone {
-    pub fn arguments<T: DeserializeOwned>(&self) -> serde_json::Result<T> {
-        serde_json::from_str(&self.arguments)
+    pub fn arguments<T: for<'de> Deserialize<'de>>(&self) -> nextjson::Result<T> {
+        nextjson::from_str(&self.arguments)
     }
 }
 
@@ -1155,8 +1104,8 @@ impl RealtimeServerEvent {
     }
 }
 
-fn decode_payload<T: DeserializeOwned>(data: &Map<String, Value>) -> serde_json::Result<T> {
-    serde_json::from_value(Value::Object(data.clone()))
+fn decode_payload<T: for<'de> Deserialize<'de>>(data: &Map) -> nextjson::Result<T> {
+    nextjson::from_value(Value::Object(data.clone()))
 }
 
 fn require_non_empty(value: String, name: &str) -> Result<String> {
@@ -1267,8 +1216,8 @@ struct AudioDonePayload {
 
 #[cfg(test)]
 mod tests {
-    use serde::Deserialize;
-    use serde_json::json;
+    use nextjson::NsonDeserialize as Deserialize;
+    use nextjson::json;
 
     use super::*;
 
@@ -1284,33 +1233,36 @@ mod tests {
                 json!({"type":"object"}),
             ));
         let value =
-            serde_json::to_value(RealtimeRequest::session_update(session).unwrap()).unwrap();
-        assert_eq!(value["type"], "session.update");
-        assert_eq!(value["session"]["model"], "glm-realtime-flash");
-        assert_eq!(value["session"]["turn_detection"]["type"], "server_vad");
+            nextjson::to_value(&RealtimeRequest::session_update(session).unwrap()).unwrap();
+        assert_eq!(value["type"].as_str(), Some("session.update"));
+        assert_eq!(value["session"]["model"].as_str(), Some("glm-realtime-flash"));
         assert_eq!(
-            value["session"]["beta_fields"]["chat_mode"],
-            "video_passive"
+            value["session"]["turn_detection"]["type"].as_str(),
+            Some("server_vad")
+        );
+        assert_eq!(
+            value["session"]["beta_fields"]["chat_mode"].as_str(),
+            Some("video_passive")
         );
 
         let item = TypedRealtimeItem::function_output("call-1", r#"{"ok":true}"#);
         let request = RealtimeRequest::create_item(None, item).unwrap();
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["item"]["call_id"], "call-1");
+        let value = nextjson::to_value(&request).unwrap();
+        assert_eq!(value["item"]["call_id"].as_str(), Some("call-1"));
 
         let options = RealtimeResponseOptions {
             instructions: Some("brief".into()),
             ..RealtimeResponseOptions::default()
         };
-        let value =
-            serde_json::to_value(RealtimeRequest::create_response(Some(options)).unwrap()).unwrap();
-        assert_eq!(value["response"]["commit"], true);
-        assert_eq!(value["response"]["cancel_previous"], true);
+        let value = nextjson::to_value(&RealtimeRequest::create_response(Some(options)).unwrap())
+            .unwrap();
+        assert_eq!(value["response"]["commit"].as_bool(), Some(true));
+        assert_eq!(value["response"]["cancel_previous"].as_bool(), Some(true));
     }
 
     #[test]
     fn decodes_typed_server_messages_and_retains_unknown_events() {
-        let raw: RealtimeServerEvent = serde_json::from_value(json!({
+        let raw: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"response.function_call_arguments.done",
             "event_id":"event-1",
             "response_id":"response-1",
@@ -1327,7 +1279,7 @@ mod tests {
         }
         assert_eq!(call.arguments::<Arguments>().unwrap().city, "Beijing");
 
-        let raw: RealtimeServerEvent = serde_json::from_value(json!({
+        let raw: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"response.future.delta",
             "delta":"kept"
         }))
@@ -1340,14 +1292,14 @@ mod tests {
 
     #[test]
     fn decodes_audio_and_complete_response_usage() {
-        let audio: RealtimeServerEvent = serde_json::from_value(json!({
+        let audio: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"response.audio.delta",
             "delta":"AQI="
         }))
         .unwrap();
         assert_eq!(audio.into_typed().audio_bytes().unwrap(), Some(vec![1, 2]));
 
-        let done: RealtimeServerEvent = serde_json::from_value(json!({
+        let done: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"response.done",
             "response": {
                 "id":"response-1",
@@ -1465,13 +1417,13 @@ mod tests {
         ];
 
         for (value, expected) in cases {
-            let raw: RealtimeServerEvent = serde_json::from_value(value).unwrap();
+            let raw: RealtimeServerEvent = nextjson::from_value(value).unwrap();
             let event = raw.into_typed();
             assert_eq!(event.event_type(), expected);
             assert!(!matches!(event, RealtimeServerMessage::Unknown(_)));
         }
 
-        let error: RealtimeServerEvent = serde_json::from_value(json!({
+        let error: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"error","error":{"message":"bad","type":"request_error"}
         }))
         .unwrap();
@@ -1480,7 +1432,7 @@ mod tests {
             Some("request_error")
         );
 
-        let text: RealtimeServerEvent = serde_json::from_value(json!({
+        let text: RealtimeServerEvent = nextjson::from_value(json!({
             "type":"response.text.delta","delta":"hello"
         }))
         .unwrap();
@@ -1503,13 +1455,13 @@ mod tests {
         ];
         let kinds = requests
             .into_iter()
-            .map(|request| serde_json::to_value(request).unwrap()["type"].clone())
+            .map(|request| nextjson::to_value(&request).unwrap()["type"].clone())
             .collect::<Vec<_>>();
 
-        assert_eq!(kinds[0], "transcription_session.update");
-        assert_eq!(kinds[1], "input_audio_buffer.append");
-        assert_eq!(kinds[2], "input_audio_buffer.append_video_frame");
-        assert_eq!(kinds[8], "response.cancel");
+        assert_eq!(kinds[0].as_str(), Some("transcription_session.update"));
+        assert_eq!(kinds[1].as_str(), Some("input_audio_buffer.append"));
+        assert_eq!(kinds[2].as_str(), Some("input_audio_buffer.append_video_frame"));
+        assert_eq!(kinds[8].as_str(), Some("response.cancel"));
         assert!(RealtimeRequest::append_audio(&[]).is_err());
         assert!(RealtimeRequest::append_video_frame(&[]).is_err());
         assert!(RealtimeRequest::delete_item(" ").is_err());
@@ -1518,13 +1470,16 @@ mod tests {
 
     #[test]
     fn forward_compatible_string_enums_and_tool_choice_round_trip() {
-        let model: RealtimeModel = serde_json::from_value(json!("glm-realtime-future")).unwrap();
+        let model: RealtimeModel = nextjson::from_value(json!("glm-realtime-future")).unwrap();
         assert_eq!(model.as_str(), "glm-realtime-future");
-        assert_eq!(serde_json::to_value(model).unwrap(), "glm-realtime-future");
+        assert_eq!(
+            nextjson::to_value(&model).unwrap().as_str(),
+            Some("glm-realtime-future")
+        );
 
         let choice = RealtimeToolChoice::function("weather");
-        let value = serde_json::to_value(choice).unwrap();
-        assert_eq!(value["type"], "function");
-        assert_eq!(value["function"], "weather");
+        let value = nextjson::to_value(&choice).unwrap();
+        assert_eq!(value["type"].as_str(), Some("function"));
+        assert_eq!(value["function"].as_str(), Some("weather"));
     }
 }

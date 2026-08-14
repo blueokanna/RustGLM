@@ -7,8 +7,8 @@ use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderValue};
 #[cfg(any(feature = "audio", feature = "files"))]
 use reqwest::multipart::{Form, Part};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use nextjson::NsonSerialize as Serialize;
+use nextjson::NsonDeserialize as Deserialize;
 #[cfg(any(
     feature = "agents",
     feature = "audio",
@@ -16,7 +16,7 @@ use serde::de::DeserializeOwned;
     feature = "files",
     feature = "tools"
 ))]
-use serde_json::Value;
+use nextjson::Value;
 
 #[cfg(feature = "video")]
 use crate::VideoGenerationRequest;
@@ -32,6 +32,8 @@ use crate::{
     AgentAsyncResultRequest, AgentAsyncResultResponse, AgentConversationRequest,
     AgentConversationResponse, OfficialAgentRequest, OfficialAgentResponse, OfficialAgentStream,
 };
+#[cfg(any(feature = "audio", feature = "files"))]
+use crate::Bytes;
 use crate::{
     AsyncTaskResponse, AsyncTaskResult, ChatCompletionChunk, ChatCompletionRequest,
     ChatCompletionResponse, EmbeddingRequest, EmbeddingResponse, HttpConfig, RerankRequest,
@@ -144,22 +146,33 @@ impl ZhipuClient {
         &self,
         request: &ChatCompletionRequest,
     ) -> Result<ChatStream> {
+        self.stream_request(request, false).await
+    }
+
+    #[cfg(feature = "tools")]
+    pub async fn chat_tool_stream(&self, request: &ChatCompletionRequest) -> Result<ToolStream> {
+        let stream = self.stream_request(request, true).await?;
+        Ok(assemble_tool_stream(stream))
+    }
+
+    /// Clones the request exactly once, applying the stream and (optionally) tool-stream flags
+    /// together so chained streaming calls never copy the payload twice.
+    async fn stream_request(
+        &self,
+        request: &ChatCompletionRequest,
+        tool_stream: bool,
+    ) -> Result<ChatStream> {
         validate_zhipu_chat(request)?;
         let mut request = request.clone();
         request.stream = true;
+        if tool_stream {
+            request.tool_stream = Some(true);
+        }
         let response = self
             .transport
             .post_stream("chat/completions", &request)
             .await?;
         Ok(sse_stream(response))
-    }
-
-    #[cfg(feature = "tools")]
-    pub async fn chat_tool_stream(&self, request: &ChatCompletionRequest) -> Result<ToolStream> {
-        let mut request = request.clone();
-        request.tool_stream = Some(true);
-        let stream = self.chat_completion_stream(&request).await?;
-        Ok(assemble_tool_stream(stream))
     }
 
     pub async fn typed_chat_completion<M: ChatModel>(
@@ -379,7 +392,7 @@ impl ZhipuClient {
         if !request.hotwords.is_empty() {
             form = form.text(
                 "hotwords",
-                serde_json::to_string(&request.hotwords)
+                nextjson::to_string(&request.hotwords)
                     .map_err(|error| SdkError::Validation(error.to_string().into()))?,
             );
         }
@@ -395,7 +408,7 @@ impl ZhipuClient {
     }
 
     #[cfg(feature = "audio")]
-    pub async fn speech(&self, request: &SpeechRequest) -> Result<Vec<u8>> {
+    pub async fn speech(&self, request: &SpeechRequest) -> Result<Bytes> {
         if request.model.trim().is_empty()
             || request.input.trim().is_empty()
             || request.voice.trim().is_empty()
@@ -492,7 +505,7 @@ impl ZhipuClient {
     }
 
     #[cfg(feature = "files")]
-    pub async fn file_content(&self, file_id: &str) -> Result<Vec<u8>> {
+    pub async fn file_content(&self, file_id: &str) -> Result<Bytes> {
         require_id(file_id, "file id")?;
         self.transport
             .get_binary(&format!("files/{}/content", encode_component(file_id)))
@@ -601,7 +614,7 @@ impl ZhipuClient {
     ) -> Result<R>
     where
         T: Serialize + ?Sized,
-        R: DeserializeOwned,
+        R: for<'de> Deserialize<'de>,
     {
         self.transport.request_json(method, path, body).await
     }
@@ -701,7 +714,7 @@ impl OpenAiCompatibleClient {
     ) -> Result<R>
     where
         T: Serialize + ?Sized,
-        R: DeserializeOwned,
+        R: for<'de> Deserialize<'de>,
     {
         self.transport.request_json(method, path, body).await
     }
@@ -745,84 +758,10 @@ impl ChatProvider for OpenAiCompatibleClient {
     }
 }
 
-#[derive(Default)]
-struct SseDecoder {
-    buffer: Vec<u8>,
-    event: Vec<u8>,
-    done: bool,
-}
-
-impl SseDecoder {
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<ChatCompletionChunk>> {
-        if self.done {
-            return Ok(Vec::new());
-        }
-        self.buffer.extend_from_slice(bytes);
-        self.drain(false)
-    }
-
-    fn finish(&mut self) -> Result<Vec<ChatCompletionChunk>> {
-        self.drain(true)
-    }
-
-    fn drain(&mut self, finish: bool) -> Result<Vec<ChatCompletionChunk>> {
-        let mut chunks = Vec::new();
-        while let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let mut line: Vec<u8> = self.buffer.drain(..=position).collect();
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            self.consume_line(&line, &mut chunks)?;
-        }
-        if finish {
-            if !self.buffer.is_empty() {
-                let line = std::mem::take(&mut self.buffer);
-                self.consume_line(&line, &mut chunks)?;
-            }
-            self.consume_event(&mut chunks)?;
-        }
-        Ok(chunks)
-    }
-
-    fn consume_line(&mut self, line: &[u8], chunks: &mut Vec<ChatCompletionChunk>) -> Result<()> {
-        if line.is_empty() {
-            return self.consume_event(chunks);
-        }
-        if line.starts_with(b"data:") {
-            let mut data = &line[5..];
-            if data.first() == Some(&b' ') {
-                data = &data[1..];
-            }
-            if !self.event.is_empty() {
-                self.event.push(b'\n');
-            }
-            self.event.extend_from_slice(data);
-        }
-        Ok(())
-    }
-
-    fn consume_event(&mut self, chunks: &mut Vec<ChatCompletionChunk>) -> Result<()> {
-        if self.event.is_empty() {
-            return Ok(());
-        }
-        let event = std::mem::take(&mut self.event);
-        if event == b"[DONE]" {
-            self.done = true;
-            return Ok(());
-        }
-        let chunk = serde_json::from_slice(&event).map_err(|error| {
-            SdkError::Stream(format!("{}: {}", error, String::from_utf8_lossy(&event)).into())
-        })?;
-        chunks.push(chunk);
-        Ok(())
-    }
-}
-
 fn sse_stream(response: reqwest::Response) -> ChatStream {
     let stream = try_stream! {
         let mut response = response;
-        let mut decoder = SseDecoder::default();
+        let mut decoder = crate::sse::SseDecoder::<ChatCompletionChunk>::default();
         while let Some(bytes) = response.chunk().await? {
             for chunk in decoder.push(&bytes)? {
                 yield chunk;
@@ -951,6 +890,8 @@ fn require_id(value: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
+const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
+
 pub(crate) fn encode_component(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -958,7 +899,8 @@ pub(crate) fn encode_component(value: &str) -> String {
             output.push(byte as char);
         } else {
             output.push('%');
-            output.push_str(&format!("{byte:02X}"));
+            output.push(HEX_UPPER[(byte >> 4) as usize] as char);
+            output.push(HEX_UPPER[(byte & 0x0F) as usize] as char);
         }
     }
     output
@@ -979,14 +921,14 @@ mod tests {
     use std::time::Duration;
 
     use futures_util::StreamExt;
-    use serde_json::json;
+    use nextjson::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     use super::*;
     use crate::{
-        ContentPart, FunctionDefinition, Glm52, MessageRole, Tool, ToolStreamEvent,
-        TypedChatRequest,
+        ContentPart, FunctionDefinition, Glm52, Glm53, MessageRole, ReasoningEffort, Thinking,
+        Tool, ToolStreamEvent, TypedChatRequest,
     };
 
     struct MockResponse {
@@ -1096,11 +1038,14 @@ mod tests {
                     ContentPart::text("describe"),
                 ],
             ));
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["messages"][0]["content"][0]["type"], "image_url");
+        let value = nextjson::to_value(&request).unwrap();
         assert_eq!(
-            value["messages"][0]["content"][0]["image_url"]["url"],
-            "https://example.com/image.png"
+            value["messages"][0]["content"][0]["type"].as_str(),
+            Some("image_url")
+        );
+        assert_eq!(
+            value["messages"][0]["content"][0]["image_url"]["url"].as_str(),
+            Some("https://example.com/image.png")
         );
     }
 
@@ -1110,14 +1055,14 @@ mod tests {
             "weather",
             json!({"type":"object","properties":{"city":{"type":"string"}}}),
         ));
-        let value = serde_json::to_value(tool).unwrap();
-        assert_eq!(value["type"], "function");
-        assert_eq!(value["function"]["name"], "weather");
+        let value = nextjson::to_value(&tool).unwrap();
+        assert_eq!(value["type"].as_str(), Some("function"));
+        assert_eq!(value["function"]["name"].as_str(), Some("weather"));
     }
 
     #[test]
     fn sse_handles_split_utf8_and_event_frames() {
-        let json = serde_json::to_vec(&json!({
+        let json = nextjson::to_vec(&json!({
             "id":"1",
             "model":"glm-5.2",
             "choices":[{"index":0,"delta":{"content":"你好"},"finish_reason":null}]
@@ -1127,7 +1072,7 @@ mod tests {
         frame.extend(json);
         frame.extend_from_slice(b"\n\ndata: [DONE]\n\n");
         let split = frame.iter().position(|value| *value >= 0x80).unwrap() + 1;
-        let mut decoder = SseDecoder::default();
+        let mut decoder = crate::sse::SseDecoder::<ChatCompletionChunk>::default();
         assert!(decoder.push(&frame[..split]).unwrap().is_empty());
         let chunks = decoder.push(&frame[split..]).unwrap();
         assert_eq!(chunks.len(), 1);
@@ -1251,7 +1196,7 @@ mod tests {
 
     #[test]
     fn sse_handles_completion_errors_and_ignored_lines() {
-        let mut decoder = SseDecoder::default();
+        let mut decoder = crate::sse::SseDecoder::<ChatCompletionChunk>::default();
         let chunks = decoder
             .push(b": ping\r\nevent: message\r\ndata: {\"id\":\"one\",\r\ndata: \"choices\":[]}\r\n\r\n")
             .unwrap();
@@ -1260,14 +1205,14 @@ mod tests {
         assert!(decoder.push(b"data: {bad}\n\n").unwrap().is_empty());
         assert!(decoder.finish().unwrap().is_empty());
 
-        let mut decoder = SseDecoder::default();
+        let mut decoder = crate::sse::SseDecoder::<ChatCompletionChunk>::default();
         let chunks = decoder
             .push(b"data:{\"id\":\"two\",\"choices\":[]}")
             .unwrap();
         assert!(chunks.is_empty());
         assert_eq!(decoder.finish().unwrap()[0].id, "two");
 
-        let mut decoder = SseDecoder::default();
+        let mut decoder = crate::sse::SseDecoder::<ChatCompletionChunk>::default();
         let error = decoder.push(b"data: {bad}\n\n").unwrap_err();
         assert!(matches!(error, SdkError::Stream(_)));
     }
@@ -1342,6 +1287,28 @@ mod tests {
                 .all(|request| request.contains("\"model\":\"glm-5.2\""))
         );
         assert!(requests[2].contains("\"tool_stream\":true"));
+    }
+
+    #[tokio::test]
+    async fn typed_glm53_request_uses_latest_model_id() {
+        let (base_url, server) = mock_server(vec![MockResponse::json(
+            r#"{"id":"response","model":"glm-5.3","choices":[{"message":{"content":"ok"}}]}"#,
+        )])
+        .await;
+        let client = ZhipuConfig::new("key").base_url(base_url).build().unwrap();
+        let request = TypedChatRequest::<Glm53>::new()
+            .thinking(Thinking::enabled())
+            .reasoning_effort(ReasoningEffort::Max)
+            .user("hello");
+
+        assert_eq!(
+            client.typed_chat_completion(&request).await.unwrap().text(),
+            Some("ok")
+        );
+
+        let requests = server.await.unwrap();
+        assert!(requests[0].contains("\"model\":\"glm-5.3\""));
+        assert!(requests[0].contains("\"reasoning_effort\":\"max\""));
     }
 
     #[tokio::test]
@@ -1516,7 +1483,7 @@ mod tests {
                 })
                 .await
                 .unwrap(),
-            b"audio"
+            b"audio".as_slice()
         );
         client.clone_voice(&json!({"voice":"x"})).await.unwrap();
         client.voices().await.unwrap();
@@ -1535,7 +1502,10 @@ mod tests {
             .await
             .unwrap();
         client.files(Some("fine tune"), Some(20)).await.unwrap();
-        assert_eq!(client.file_content("file/id").await.unwrap(), b"file-data");
+        assert_eq!(
+            client.file_content("file/id").await.unwrap(),
+            b"file-data".as_slice()
+        );
         client.delete_file("file/id").await.unwrap();
         client.create_file_parse_task(&json!({})).await.unwrap();
         client
@@ -1608,12 +1578,12 @@ mod tests {
             .request_json(Method::POST, "custom", Some(&json!({"x":1})))
             .await
             .unwrap();
-        assert_eq!(post["method"], "post");
+        assert_eq!(post["method"].as_str(), Some("post"));
         let get: Value = client
             .request_json::<Value, Value>(Method::GET, "custom", None)
             .await
             .unwrap();
-        assert_eq!(get["method"], "get");
+        assert_eq!(get["method"].as_str(), Some("get"));
         assert_eq!(client.name(), "zhipu");
         assert!(client.capabilities().multimodal);
         assert_eq!(
@@ -1639,7 +1609,7 @@ mod tests {
             .request_json(Method::PATCH, "models/x", Some(&json!({})))
             .await
             .unwrap();
-        assert_eq!(custom["custom"], true);
+        assert_eq!(custom["custom"].as_bool(), Some(true));
         let requests = server.await.unwrap();
         assert!(
             requests[0]

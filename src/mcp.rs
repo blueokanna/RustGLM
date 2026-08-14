@@ -12,7 +12,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::common::client_side_sse::NeverRetry;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{Peer, RoleClient, ServiceExt};
-use serde_json::Map;
+use nextjson::Map;
 
 use crate::{McpClientError, Result};
 
@@ -165,18 +165,14 @@ impl McpClient {
             .map_err(|error| McpClientError::Request(error.to_string()).into())
     }
 
-    pub async fn call_tool(
-        &self,
-        name: impl Into<String>,
-        arguments: Option<Map<String, serde_json::Value>>,
-    ) -> Result<McpToolResult> {
+    pub async fn call_tool(&self, name: impl Into<String>, arguments: Option<Map>) -> Result<McpToolResult> {
         let name = name.into();
         if name.trim().is_empty() {
             return Err(McpClientError::Request("tool name cannot be empty".into()).into());
         }
         let mut request = CallToolRequestParams::new(name);
         if let Some(arguments) = arguments {
-            request = request.with_arguments(arguments);
+            request = request.with_arguments(to_serde_map(&arguments));
         }
         self.service
             .call_tool(request)
@@ -215,11 +211,11 @@ impl McpClient {
     pub async fn get_prompt(
         &self,
         name: impl Into<String>,
-        arguments: Option<Map<String, serde_json::Value>>,
+        arguments: Option<Map>,
     ) -> Result<McpGetPromptResult> {
         let mut request = GetPromptRequestParams::default();
         request.name = name.into();
-        request.arguments = arguments;
+        request.arguments = arguments.as_ref().map(to_serde_map);
         self.service
             .get_prompt(request)
             .await
@@ -245,6 +241,39 @@ fn validate_endpoint(endpoint: &str) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+/// Converts a nextjson map into the `serde_json` map required by the rmcp wire
+/// model. This is the only serde_json contact point in the SDK: rmcp is
+/// serde-native, so the conversion is isolated here and reaches serde_json
+/// exclusively through rmcp's re-export.
+fn to_serde_map(map: &Map) -> rmcp::serde_json::Map<String, rmcp::serde_json::Value> {
+    map.iter()
+        .map(|(key, value)| (key.to_owned(), to_serde_value(value)))
+        .collect()
+}
+
+fn to_serde_value(value: &nextjson::Value) -> rmcp::serde_json::Value {
+    match value {
+        nextjson::Value::Null => rmcp::serde_json::Value::Null,
+        nextjson::Value::Bool(value) => rmcp::serde_json::Value::Bool(*value),
+        nextjson::Value::Number(value) => {
+            if let Some(integer) = value.as_i64() {
+                rmcp::serde_json::Value::Number(rmcp::serde_json::Number::from(integer))
+            } else if let Some(integer) = value.as_u64() {
+                rmcp::serde_json::Value::Number(rmcp::serde_json::Number::from(integer))
+            } else {
+                rmcp::serde_json::Number::from_f64(value.as_f64())
+                    .map(rmcp::serde_json::Value::Number)
+                    .unwrap_or(rmcp::serde_json::Value::Null)
+            }
+        }
+        nextjson::Value::String(value) => rmcp::serde_json::Value::String(value.clone()),
+        nextjson::Value::Array(values) => {
+            rmcp::serde_json::Value::Array(values.iter().map(to_serde_value).collect())
+        }
+        nextjson::Value::Object(object) => rmcp::serde_json::Value::Object(to_serde_map(object)),
+    }
 }
 
 #[cfg(test)]

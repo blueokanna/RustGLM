@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use bytes::Bytes;
+use nextjson::Value;
+use nextjson::NsonSerialize as Serialize;
+use nextjson::NsonDeserialize as Deserialize;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
 use reqwest::{Client, Method, Response, StatusCode};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_json::Value;
 use tokio::time::sleep;
 
 use crate::auth::AuthenticationProvider;
@@ -109,15 +110,13 @@ impl Transport {
     pub(crate) async fn post_json<T, R>(&self, path: &str, body: &T) -> Result<R>
     where
         T: Serialize + ?Sized,
-        R: DeserializeOwned,
+        R: for<'de> Deserialize<'de>,
     {
-        let bytes = serde_json::to_vec(body)
-            .map_err(|error| SdkError::Validation(error.to_string().into()))?;
         let response = self
             .send_bytes(
                 Method::POST,
                 path,
-                bytes,
+                encode(body)?,
                 "application/json",
                 "application/json",
             )
@@ -130,12 +129,10 @@ impl Transport {
         path: &str,
         body: &T,
     ) -> Result<Response> {
-        let bytes = serde_json::to_vec(body)
-            .map_err(|error| SdkError::Validation(error.to_string().into()))?;
         self.send_bytes(
             Method::POST,
             path,
-            bytes,
+            encode(body)?,
             "application/json",
             "text/event-stream",
         )
@@ -149,12 +146,10 @@ impl Transport {
         body: &T,
         headers: HeaderMap,
     ) -> Result<Response> {
-        let bytes = serde_json::to_vec(body)
-            .map_err(|error| SdkError::Validation(error.to_string().into()))?;
         self.send_bytes_with_headers(
             Method::POST,
             path,
-            bytes,
+            encode(body)?,
             "application/json",
             "text/event-stream",
             headers,
@@ -168,16 +163,14 @@ impl Transport {
         path: &str,
         body: &T,
         accept: &str,
-    ) -> Result<Vec<u8>> {
-        let bytes = serde_json::to_vec(body)
-            .map_err(|error| SdkError::Validation(error.to_string().into()))?;
+    ) -> Result<Bytes> {
         let response = self
-            .send_bytes(Method::POST, path, bytes, "application/json", accept)
+            .send_bytes(Method::POST, path, encode(body)?, "application/json", accept)
             .await?;
-        Ok(response.bytes().await?.to_vec())
+        Ok(response.bytes().await?)
     }
 
-    pub(crate) async fn get_json<R: DeserializeOwned>(&self, path: &str) -> Result<R> {
+    pub(crate) async fn get_json<R: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<R> {
         let response = self
             .send_empty(Method::GET, path, "application/json")
             .await?;
@@ -185,13 +178,13 @@ impl Transport {
     }
 
     #[cfg_attr(not(feature = "files"), allow(dead_code))]
-    pub(crate) async fn get_binary(&self, path: &str) -> Result<Vec<u8>> {
+    pub(crate) async fn get_binary(&self, path: &str) -> Result<Bytes> {
         let response = self.send_empty(Method::GET, path, "*/*").await?;
-        Ok(response.bytes().await?.to_vec())
+        Ok(response.bytes().await?)
     }
 
     #[cfg_attr(not(any(feature = "files", feature = "rag")), allow(dead_code))]
-    pub(crate) async fn delete_json<R: DeserializeOwned>(&self, path: &str) -> Result<R> {
+    pub(crate) async fn delete_json<R: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<R> {
         let response = self
             .send_empty(Method::DELETE, path, "application/json")
             .await?;
@@ -202,7 +195,7 @@ impl Transport {
         not(any(feature = "audio", feature = "files", feature = "rag")),
         allow(dead_code)
     )]
-    pub(crate) async fn post_multipart<R: DeserializeOwned>(
+    pub(crate) async fn post_multipart<R: for<'de> Deserialize<'de>>(
         &self,
         path: &str,
         form: reqwest::multipart::Form,
@@ -229,13 +222,11 @@ impl Transport {
     ) -> Result<R>
     where
         T: Serialize + ?Sized,
-        R: DeserializeOwned,
+        R: for<'de> Deserialize<'de>,
     {
         let response = match body {
             Some(body) => {
-                let bytes = serde_json::to_vec(body)
-                    .map_err(|error| SdkError::Validation(error.to_string().into()))?;
-                self.send_bytes(method, path, bytes, "application/json", "application/json")
+                self.send_bytes(method, path, encode(body)?, "application/json", "application/json")
                     .await?
             }
             None => self.send_empty(method, path, "application/json").await?,
@@ -247,7 +238,7 @@ impl Transport {
         &self,
         method: Method,
         path: &str,
-        body: Vec<u8>,
+        body: Bytes,
         content_type: &str,
         accept: &str,
     ) -> Result<Response> {
@@ -259,7 +250,7 @@ impl Transport {
         &self,
         method: Method,
         path: &str,
-        body: Vec<u8>,
+        body: Bytes,
         content_type: &str,
         accept: &str,
         extra_headers: HeaderMap,
@@ -348,7 +339,7 @@ impl Transport {
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let body = response.text().await.unwrap_or_default();
-        let value = serde_json::from_str::<Value>(&body).ok();
+        let value = nextjson::from_str::<Value>(&body).ok();
         let error = value
             .as_ref()
             .and_then(|value| value.get("error"))
@@ -379,9 +370,9 @@ impl Transport {
         }))
     }
 
-    async fn decode_json<R: DeserializeOwned>(&self, response: Response) -> Result<R> {
+    async fn decode_json<R: for<'de> Deserialize<'de>>(&self, response: Response) -> Result<R> {
         let body = response.bytes().await?;
-        serde_json::from_slice(&body).map_err(|error| SdkError::Decode {
+        nextjson::from_slice(&body).map_err(|error| SdkError::Decode {
             message: error.to_string(),
             body: String::from_utf8_lossy(&body).into_owned(),
         })
@@ -411,6 +402,15 @@ fn normalize_base_url(value: String) -> Result<String> {
         ));
     }
     Ok(value.to_owned())
+}
+
+/// Serializes a request body into a shared, ref-counted byte buffer.
+///
+/// `Bytes` clones are O(1), so retrying a request does not re-copy the payload.
+fn encode<T: Serialize + ?Sized>(body: &T) -> Result<Bytes> {
+    nextjson::to_vec(body)
+        .map(Bytes::from)
+        .map_err(|error| SdkError::Validation(error.to_string().into()))
 }
 
 fn validate_path(path: &str) -> Result<()> {
@@ -454,7 +454,7 @@ fn backoff(retry: &RetryPolicy, attempt: u32) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use nextjson::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -674,8 +674,8 @@ mod tests {
         );
         let post: Value = client.post_json("post", &json!({"value":1})).await.unwrap();
         let get: Value = client.get_json("get").await.unwrap();
-        assert_eq!(post["ok"], true);
-        assert_eq!(get["ok"], true);
+        assert_eq!(post["ok"].as_bool(), Some(true));
+        assert_eq!(get["ok"].as_bool(), Some(true));
         let requests = server.await.unwrap();
         assert_eq!(requests.len(), 4);
         assert!(requests[0].starts_with("POST /post "));
@@ -719,11 +719,14 @@ mod tests {
                 .post_binary("binary", &json!({}), "audio/*")
                 .await
                 .unwrap(),
-            b"post-bytes"
+            b"post-bytes".as_slice()
         );
-        assert_eq!(client.get_binary("binary").await.unwrap(), b"get-bytes");
+        assert_eq!(
+            client.get_binary("binary").await.unwrap(),
+            b"get-bytes".as_slice()
+        );
         let deleted: Value = client.delete_json("item").await.unwrap();
-        assert_eq!(deleted["deleted"], true);
+        assert_eq!(deleted["deleted"].as_bool(), Some(true));
         let requests = server.await.unwrap();
         assert!(requests[0].to_ascii_lowercase().contains("accept: audio/*"));
         assert!(requests[1].to_ascii_lowercase().contains("accept: */*"));

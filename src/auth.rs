@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::header::HeaderValue;
-use serde::Serialize;
+use nextjson::NsonSerialize as Serialize;
 use sha2::Sha256;
 
 use crate::{Result, SdkError};
@@ -64,6 +64,13 @@ impl JwtAuthentication {
                 "JWT API key must contain exactly one dot separating key id and secret".into(),
             ));
         }
+        if api_key.chars().any(char::is_whitespace)
+            || api_secret.chars().any(char::is_whitespace)
+        {
+            return Err(SdkError::Configuration(
+                "JWT key id and secret cannot contain whitespace".into(),
+            ));
+        }
         Ok(Self::new(api_key, api_secret))
     }
 
@@ -107,6 +114,13 @@ impl JwtAuthentication {
         if self.api_key.trim().is_empty() || self.api_secret.is_empty() {
             return Err(SdkError::Configuration(
                 "JWT key id and secret cannot be empty".into(),
+            ));
+        }
+        if self.api_key.chars().any(char::is_whitespace)
+            || self.api_secret.chars().any(char::is_whitespace)
+        {
+            return Err(SdkError::Configuration(
+                "JWT key id and secret cannot contain whitespace".into(),
             ));
         }
         if self.token_ttl.is_zero() {
@@ -255,7 +269,7 @@ fn generate_token_at(config: &JwtAuthentication, now_millis: u64) -> Result<Stri
 }
 
 fn encode_json<T: Serialize>(value: &T) -> Result<String> {
-    let bytes = serde_json::to_vec(value)
+    let bytes = nextjson::to_vec(value)
         .map_err(|error| SdkError::Configuration(error.to_string().into()))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
@@ -275,11 +289,11 @@ fn duration_millis(value: Duration) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use nextjson::Value;
 
     fn decode_segment(value: &str) -> Value {
         let bytes = URL_SAFE_NO_PAD.decode(value).unwrap();
-        serde_json::from_slice(&bytes).unwrap()
+        nextjson::from_slice(&bytes).unwrap()
     }
 
     #[test]
@@ -292,8 +306,8 @@ mod tests {
 
     #[test]
     fn rejects_invalid_combined_api_keys() {
-        for value in ["", "key", ".secret", "key.", "a.b.c"] {
-            assert!(JwtAuthentication::from_api_key(value).is_err());
+        for value in ["", "key", ".secret", "key.", "a.b.c", "key. secret", "key .secret"] {
+            assert!(JwtAuthentication::from_api_key(value).is_err(), "{value}");
         }
     }
 
@@ -305,11 +319,11 @@ mod tests {
         assert_eq!(parts.len(), 3);
         assert_eq!(
             decode_segment(parts[0]),
-            serde_json::json!({"alg":"HS256","sign_type":"SIGN"})
+            nextjson::json!({"alg":"HS256","sign_type":"SIGN"})
         );
         assert_eq!(
             decode_segment(parts[1]),
-            serde_json::json!({"api_key":"key","timestamp":1700000000000u64,"exp":1700000180000u64})
+            nextjson::json!({"api_key":"key","exp":1700000180000u64,"timestamp":1700000000000u64})
         );
         assert!(!parts[2].contains('='));
     }

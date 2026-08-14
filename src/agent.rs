@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_util::Stream;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use nextjson::{Map, Value};
+
+use crate::wire_enum;
 
 use crate::client::{OpenAiCompatibleConfig, ZHIPU_BASE_URL, ZhipuConfig};
 use crate::{
@@ -20,12 +21,16 @@ use crate::{
 pub type OfficialAgentStream = Pin<Box<dyn Stream<Item = Result<OfficialAgentResponse>> + Send>>;
 pub type RetrievalAgentStream = Pin<Box<dyn Stream<Item = Result<RetrievalAgentEvent>> + Send>>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum OfficialAgentRole {
-    System,
-    User,
-    Assistant,
+/// Monotonic counter that keeps agent memory ids unique even within the same nanosecond.
+static AGENT_MEMORY_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+wire_enum! {
+    /// Official agent message role.
+    pub enum OfficialAgentRole {
+        System => "system",
+        User => "user",
+        Assistant => "assistant",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,7 +104,7 @@ pub struct OfficialAgentRequest {
     pub messages: Vec<OfficialAgentMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_variables: Option<Value>,
-    #[serde(flatten, default, skip_serializing_if = "Map::is_empty")]
+    #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
 
@@ -119,13 +124,13 @@ impl OfficialAgentRequest {
         self
     }
 
-    pub fn custom_variables(mut self, value: impl Serialize) -> serde_json::Result<Self> {
-        self.custom_variables = Some(serde_json::to_value(value)?);
+    pub fn custom_variables(mut self, value: impl Serialize) -> nextjson::Result<Self> {
+        self.custom_variables = Some(nextjson::to_value(&value)?);
         Ok(self)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TranslationAgentVariables {
     #[serde(default = "default_source_language")]
     pub source_lang: String,
@@ -225,13 +230,20 @@ pub struct AgentAsyncResultResponse {
     pub extra: ExtraFields,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentAsyncStatus {
-    Success,
-    Failed,
-    #[default]
-    Pending,
+wire_enum! {
+    /// Async agent task status.
+    pub enum AgentAsyncStatus {
+        Success => "success",
+        Failed => "failed",
+        Pending => "pending",
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for AgentAsyncStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -385,17 +397,18 @@ impl RetrievalAgentRequest {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RetrievalAgentEventType {
-    SessionCreated,
-    Reasoning,
-    Thought,
-    ToolCall,
-    ToolResult,
-    Answer,
-    Done,
-    Error,
+wire_enum! {
+    /// Retrieval agent event type.
+    pub enum RetrievalAgentEventType {
+        SessionCreated => "session_created",
+        Reasoning => "reasoning",
+        Thought => "thought",
+        ToolCall => "tool_call",
+        ToolResult => "tool_result",
+        Answer => "answer",
+        Done => "done",
+        Error => "error",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -452,7 +465,7 @@ impl RetrievalAgentEvent {
         self.parse_data(RetrievalAgentEventType::Error)
     }
 
-    fn parse_data<T: DeserializeOwned>(
+    fn parse_data<T: for<'de> Deserialize<'de>>(
         &self,
         expected: RetrievalAgentEventType,
     ) -> Result<Option<T>> {
@@ -463,7 +476,7 @@ impl RetrievalAgentEvent {
             message: "retrieval agent event is missing data".into(),
             body: String::new(),
         })?;
-        serde_json::from_value(data.clone())
+        nextjson::from_value(data.clone())
             .map(Some)
             .map_err(|error| SdkError::Decode {
                 message: error.to_string(),
@@ -479,7 +492,7 @@ pub struct RetrievalAgentToolCall {
     #[serde(rename = "toolName")]
     pub tool_name: String,
     #[serde(default)]
-    pub arguments: Map<String, Value>,
+    pub arguments: Map,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -488,18 +501,19 @@ pub struct RetrievalAgentToolResult {
     pub call_id: String,
     #[serde(rename = "toolName")]
     pub tool_name: String,
-    #[serde(default)]
+    #[serde(default = "null_value")]
     pub result: Value,
     pub status: RetrievalAgentToolStatus,
     #[serde(default, rename = "durationMs")]
     pub duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum RetrievalAgentToolStatus {
-    Success,
-    Error,
+wire_enum! {
+    /// Retrieval agent tool result status.
+    pub enum RetrievalAgentToolStatus {
+        Success => "success",
+        Error => "error",
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -603,11 +617,13 @@ impl AgentPersona {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentProtocol {
-    Zhipu,
-    OpenAiCompatible,
+wire_enum! {
+    /// Agent provider protocol.
+    pub enum AgentProtocol {
+        Zhipu => "zhipu",
+        OpenAiCompatible => "openai_compatible",
+        ; strict
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -743,12 +759,12 @@ impl AgentManifest {
 
     pub fn to_json(&self) -> Result<String> {
         self.validate()?;
-        serde_json::to_string_pretty(self)
+        nextjson::to_string_pretty(self)
             .map_err(|error| SdkError::Configuration(error.to_string().into()))
     }
 
     pub fn from_json(value: &str) -> Result<Self> {
-        let manifest: Self = serde_json::from_str(value)
+        let manifest: Self = nextjson::from_str(value)
             .map_err(|error| SdkError::Configuration(error.to_string().into()))?;
         manifest.validate()?;
         Ok(manifest)
@@ -918,7 +934,7 @@ impl AgentRuntime {
                     .collect::<Vec<_>>();
                 messages.push(ChatMessage::system(format!(
                     "Relevant prior context:\n{}",
-                    serde_json::to_string(&values)
+                    nextjson::to_string(&values)
                         .map_err(|error| SdkError::Validation(error.to_string().into()))?
                 )));
             }
@@ -973,7 +989,7 @@ impl AgentRuntime {
                     SdkError::Tool(format!("tool call {} has no function payload", call.id).into())
                 })?;
                 let arguments =
-                    serde_json::from_str::<Value>(&function.arguments).map_err(|error| {
+                    nextjson::from_str::<Value>(&function.arguments).map_err(|error| {
                         SdkError::Tool(
                             format!(
                                 "tool {} arguments are not valid JSON: {error}",
@@ -986,7 +1002,7 @@ impl AgentRuntime {
                     SdkError::Tool(format!("tool {} is not registered", function.name).into())
                 })?;
                 let output = tool.execute(arguments.clone()).await?;
-                let output_text = serde_json::to_string(&output)
+                let output_text = nextjson::to_string(&output)
                     .map_err(|error| SdkError::Tool(error.to_string().into()))?;
                 messages.push(ChatMessage::tool_result(&call.id, output_text));
                 executions.push(AgentToolExecution {
@@ -1047,11 +1063,11 @@ fn decode_sse_stream<T>(
     response: reqwest::Response,
 ) -> Pin<Box<dyn Stream<Item = Result<T>> + Send>>
 where
-    T: DeserializeOwned + Send + 'static,
+    T: for<'de> Deserialize<'de> + Send + 'static,
 {
     let stream = try_stream! {
         let mut response = response;
-        let mut decoder = AgentSseDecoder::<T>::default();
+        let mut decoder = crate::sse::SseDecoder::<T>::default();
         while let Some(bytes) = response.chunk().await? {
             for value in decoder.push(&bytes)? {
                 yield value;
@@ -1064,88 +1080,9 @@ where
     Box::pin(stream)
 }
 
-struct AgentSseDecoder<T> {
-    buffer: Vec<u8>,
-    event: Vec<u8>,
-    done: bool,
-    marker: PhantomData<T>,
-}
-
-impl<T> Default for AgentSseDecoder<T> {
-    fn default() -> Self {
-        Self {
-            buffer: Vec::new(),
-            event: Vec::new(),
-            done: false,
-            marker: PhantomData,
-        }
-    }
-}
-
-impl<T: DeserializeOwned> AgentSseDecoder<T> {
-    fn push(&mut self, bytes: &[u8]) -> Result<Vec<T>> {
-        if self.done {
-            return Ok(Vec::new());
-        }
-        self.buffer.extend_from_slice(bytes);
-        self.drain(false)
-    }
-
-    fn finish(&mut self) -> Result<Vec<T>> {
-        self.drain(true)
-    }
-
-    fn drain(&mut self, finish: bool) -> Result<Vec<T>> {
-        let mut values = Vec::new();
-        while let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let mut line = self.buffer.drain(..=position).collect::<Vec<_>>();
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-            self.consume_line(&line, &mut values)?;
-        }
-        if finish {
-            if !self.buffer.is_empty() {
-                let line = std::mem::take(&mut self.buffer);
-                self.consume_line(&line, &mut values)?;
-            }
-            self.consume_event(&mut values)?;
-        }
-        Ok(values)
-    }
-
-    fn consume_line(&mut self, line: &[u8], values: &mut Vec<T>) -> Result<()> {
-        if line.is_empty() {
-            return self.consume_event(values);
-        }
-        if line.starts_with(b"data:") {
-            let mut data = &line[5..];
-            if data.first() == Some(&b' ') {
-                data = &data[1..];
-            }
-            if !self.event.is_empty() {
-                self.event.push(b'\n');
-            }
-            self.event.extend_from_slice(data);
-        }
-        Ok(())
-    }
-
-    fn consume_event(&mut self, values: &mut Vec<T>) -> Result<()> {
-        if self.event.is_empty() {
-            return Ok(());
-        }
-        let event = std::mem::take(&mut self.event);
-        if event == b"[DONE]" {
-            self.done = true;
-            return Ok(());
-        }
-        values.push(serde_json::from_slice(&event).map_err(|error| {
-            SdkError::Stream(format!("{}: {}", error, String::from_utf8_lossy(&event)).into())
-        })?);
-        Ok(())
-    }
+/// Default JSON null used by optional `Value` fields that nextjson cannot default-construct.
+fn null_value() -> Value {
+    Value::Null
 }
 
 fn push_prompt(sections: &mut Vec<String>, label: &str, value: &str) {
@@ -1159,7 +1096,8 @@ fn agent_memory_id() -> Result<String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|_| SdkError::Configuration("system clock is before Unix epoch".into()))?
         .as_nanos();
-    Ok(format!("agent-{timestamp}"))
+    let sequence = AGENT_MEMORY_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    Ok(format!("agent-{timestamp}-{sequence}"))
 }
 
 fn default_source_language() -> String {
@@ -1217,7 +1155,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use futures_util::stream;
-    use serde_json::json;
+    use nextjson::json;
 
     use super::*;
     use crate::{
@@ -1347,7 +1285,7 @@ mod tests {
 
     fn manifest() -> AgentManifest {
         AgentManifest::new(
-            "glm-5.2",
+            "glm-5.3",
             AgentPersona::new("Lin", "technical companion")
                 .background("Rust engineer")
                 .trait_value("precise")
@@ -1371,16 +1309,22 @@ mod tests {
             ]))
             .custom_variables(TranslationAgentVariables::default())
             .unwrap();
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["agent_id"], "general_translation");
-        assert_eq!(value["messages"][1]["content"][1]["type"], "file_id");
-        assert_eq!(value["custom_variables"]["strategy"], "general");
+        let value = nextjson::to_value(&request).unwrap();
+        assert_eq!(value["agent_id"].as_str(), Some("general_translation"));
+        assert_eq!(
+            value["messages"][1]["content"][1]["type"].as_str(),
+            Some("file_id")
+        );
+        assert_eq!(
+            value["custom_variables"]["strategy"].as_str(),
+            Some("general")
+        );
         assert!(value.get("stream").is_none());
     }
 
     #[test]
     fn official_agent_output_supports_every_documented_modality() {
-        let response: OfficialAgentResponse = serde_json::from_value(json!({
+        let response: OfficialAgentResponse = nextjson::from_value(json!({
             "id":"agent-1",
             "choices":[{"index":0,"messages":[
                 {"role":"assistant","content":"plain"},
@@ -1399,10 +1343,10 @@ mod tests {
 
     #[test]
     fn translation_defaults_match_official_schema() {
-        let value = serde_json::to_value(TranslationAgentVariables::default()).unwrap();
-        assert_eq!(value["source_lang"], "auto");
-        assert_eq!(value["target_lang"], "zh-CN");
-        assert_eq!(value["strategy"], "general");
+        let value = nextjson::to_value(&TranslationAgentVariables::default()).unwrap();
+        assert_eq!(value["source_lang"].as_str(), Some("auto"));
+        assert_eq!(value["target_lang"].as_str(), Some("zh-CN"));
+        assert_eq!(value["strategy"].as_str(), Some("general"));
     }
 
     #[test]
@@ -1425,11 +1369,14 @@ mod tests {
                 },
             ]),
         });
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["model"], "glm-5v-turbo");
-        assert_eq!(value["retrieval"]["top_k"], 8);
-        assert_eq!(value["messages"][1]["content"][1]["type"], "image_url");
-        let event: RetrievalAgentEvent = serde_json::from_value(json!({
+        let value = nextjson::to_value(&request).unwrap();
+        assert_eq!(value["model"].as_str(), Some("glm-5v-turbo"));
+        assert_eq!(value["retrieval"]["top_k"].as_u64(), Some(8));
+        assert_eq!(
+            value["messages"][1]["content"][1]["type"].as_str(),
+            Some("image_url")
+        );
+        let event: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"session_created","sessionId":"session-1","data":"ready"
         }))
         .unwrap();
@@ -1437,29 +1384,29 @@ mod tests {
         assert_eq!(event.session_id.as_deref(), Some("session-1"));
         assert!(event.tool_call().unwrap().is_none());
 
-        let tool_call: RetrievalAgentEvent = serde_json::from_value(json!({
+        let tool_call: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"tool_call",
             "data":{"callId":"call-1","toolName":"search","arguments":{"query":"Rust"}}
         }))
         .unwrap();
         assert_eq!(tool_call.tool_call().unwrap().unwrap().tool_name, "search");
-        let tool_result: RetrievalAgentEvent = serde_json::from_value(json!({
+        let tool_result: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"tool_result",
             "data":{"callId":"call-1","toolName":"search","result":{"count":1},"status":"success","durationMs":12}
         }))
         .unwrap();
         assert_eq!(tool_result.tool_result().unwrap().unwrap().duration_ms, 12);
-        let answer: RetrievalAgentEvent = serde_json::from_value(json!({
+        let answer: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"answer","data":"finished"
         }))
         .unwrap();
         assert_eq!(answer.text(), Some("finished"));
-        let error: RetrievalAgentEvent = serde_json::from_value(json!({
+        let error: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"error","data":{"message":"failed"}
         }))
         .unwrap();
         assert_eq!(error.error().unwrap().unwrap().message, "failed");
-        let invalid: RetrievalAgentEvent = serde_json::from_value(json!({
+        let invalid: RetrievalAgentEvent = nextjson::from_value(json!({
             "type":"tool_call"
         }))
         .unwrap();
@@ -1468,7 +1415,7 @@ mod tests {
 
     #[test]
     fn conversation_history_response_is_strongly_typed() {
-        let response: AgentConversationResponse = serde_json::from_value(json!({
+        let response: AgentConversationResponse = nextjson::from_value(json!({
             "conversation_id":"conversation-1",
             "agent_id":"slides_glm_agent",
             "choices":[{"message":[{"role":"assistant","content":[{
@@ -1675,7 +1622,7 @@ mod tests {
 
     #[test]
     fn sse_decoder_handles_chunks_done_and_errors() {
-        let mut decoder = AgentSseDecoder::<RetrievalAgentEvent>::default();
+        let mut decoder = crate::sse::SseDecoder::<RetrievalAgentEvent>::default();
         assert!(decoder.push(b"data: {\"type\":\"ans").unwrap().is_empty());
         let values = decoder
             .push(b"wer\",\"data\":\"ok\"}\n\ndata: [DONE]\n\n")
@@ -1683,9 +1630,9 @@ mod tests {
         assert_eq!(values.len(), 1);
         assert_eq!(values[0].kind, RetrievalAgentEventType::Answer);
         assert!(decoder.push(b"data: {}\n\n").unwrap().is_empty());
-        let mut invalid = AgentSseDecoder::<RetrievalAgentEvent>::default();
+        let mut invalid = crate::sse::SseDecoder::<RetrievalAgentEvent>::default();
         assert!(invalid.push(b"data: nope\n\n").is_err());
-        let mut trailing = AgentSseDecoder::<RetrievalAgentEvent>::default();
+        let mut trailing = crate::sse::SseDecoder::<RetrievalAgentEvent>::default();
         trailing
             .push(b"data: {\"type\":\"answer\",\"data\":\"tail\"}")
             .unwrap();

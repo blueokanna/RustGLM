@@ -4,7 +4,7 @@ use rustglm::{ChatMessage, TokenizerRequest, ZhipuClient};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = ZhipuClient::new(std::env::var("ZHIPU_API_KEY")?)?;
     let request = TokenizerRequest::new(
-        "glm-5.2",
+        "glm-5.3",
         [ChatMessage::user("Count the tokens in this message.")],
     );
     let response = client.tokenizer(&request).await?;

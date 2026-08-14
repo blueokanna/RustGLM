@@ -1,6 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use serde::{Deserialize, Serialize};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
 use crate::{
     ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart, MessageRole, Result,
@@ -145,29 +145,32 @@ pub fn pcm16_mono_wav(pcm: &[u8], sample_rate: u32) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use nextjson::json;
 
     use super::*;
 
     #[test]
     fn voice_request_encodes_wav_using_official_wire_format() {
         let request = Glm4VoiceRequest::from_wav("repeat slowly", b"RIFFdata").unwrap();
-        let value = serde_json::to_value(request).unwrap();
-        assert_eq!(value["model"], "glm-4-voice");
-        assert_eq!(value["messages"][0]["content"][1]["type"], "input_audio");
+        let value = nextjson::to_value(&request).unwrap();
+        assert_eq!(value["model"].as_str(), Some("glm-4-voice"));
         assert_eq!(
-            value["messages"][0]["content"][1]["input_audio"]["format"],
-            "wav"
+            value["messages"][0]["content"][1]["type"].as_str(),
+            Some("input_audio")
         );
         assert_eq!(
-            value["messages"][0]["content"][1]["input_audio"]["data"],
-            "UklGRmRhdGE="
+            value["messages"][0]["content"][1]["input_audio"]["format"].as_str(),
+            Some("wav")
+        );
+        assert_eq!(
+            value["messages"][0]["content"][1]["input_audio"]["data"].as_str(),
+            Some("UklGRmRhdGE=")
         );
     }
 
     #[test]
     fn voice_response_decodes_pcm_and_wraps_wav() {
-        let response: ChatCompletionResponse = serde_json::from_value(json!({
+        let response: ChatCompletionResponse = nextjson::from_value(json!({
             "model":"glm-4-voice",
             "choices":[{"message":{"role":"assistant","content":"ok","audio":{
                 "id":"audio-1","expires_at":1749187238,"data":"AQIDBA=="
@@ -187,7 +190,7 @@ mod tests {
         assert!(Glm4VoiceRequest::from_wav("prompt", b"").is_err());
         assert!(pcm16_mono_wav(&[1], 44_100).is_err());
         assert!(pcm16_mono_wav(&[1, 2], 0).is_err());
-        let response: ChatCompletionResponse = serde_json::from_value(json!({
+        let response: ChatCompletionResponse = nextjson::from_value(json!({
             "choices":[{"message":{"audio":{"data":"%%%"}}}]
         }))
         .unwrap();
