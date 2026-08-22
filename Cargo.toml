@@ -4,19 +4,14 @@ version = "1.0.2"
 edition = "2024"
 rust-version = "1.88"
 resolver = "2"
-authors = ["blueokanna <blueokanna@gmail.com>"]
+authors = ["blueokanna"]
 repository = "https://github.com/blueokanna/rustglm.git"
 license = "Apache-2.0"
-description = "Production-oriented async Rust SDK for Zhipu GLM, Realtime, Batch, RAG, and MCP"
+description = "Production-oriented async Rust SDK for Zhipu GLM, Realtime, Batch, RAG and MCP"
 homepage = "https://github.com/blueokanna/rustglm"
 readme = "README.md"
 keywords = ["zhipu", "chatglm", "llm", "ai", "rust-sdk"]
-categories = [
-    "api-bindings",
-    "web-programming::http-client",
-    "web-programming::web-sockets",
-    "asynchronous",
-]
+categories = ["api-bindings", "web-programming::http-client", "asynchronous"]
 include = [
     ".cargo/config.toml",
     "src/**",
