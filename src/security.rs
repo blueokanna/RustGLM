@@ -8,22 +8,35 @@ pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 pub const DEFAULT_MAX_SSE_EVENT_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_SSE_DATA_LINES: usize = 4_096;
-pub const DEFAULT_MAX_TOOL_ARGUMENTS_BYTES: usize = 1024 * 1024;
-pub const DEFAULT_MAX_PENDING_TOOL_CALLS: usize = 128;
-pub const DEFAULT_MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_MEMORY_TEXT_BYTES: usize = 8 * 1024;
-pub const DEFAULT_MAX_AGENT_STEPS: u32 = 64;
-pub const DEFAULT_MAX_TOOL_EXECUTIONS: usize = 64;
-pub const DEFAULT_MAX_WS_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
-pub const DEFAULT_MAX_WS_FRAME_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_VECTOR_STORE_CAPACITY: usize = 10_000;
+
+#[cfg(feature = "tools")]
+pub const DEFAULT_MAX_TOOL_ARGUMENTS_BYTES: usize = 1024 * 1024;
+#[cfg(feature = "tools")]
+pub const DEFAULT_MAX_PENDING_TOOL_CALLS: usize = 128;
+
+#[cfg(any(feature = "agents", feature = "rag"))]
+pub const DEFAULT_MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
+#[cfg(any(feature = "agents", feature = "rag"))]
+pub const DEFAULT_MAX_AGENT_STEPS: u32 = 64;
+#[cfg(any(feature = "agents", feature = "rag"))]
+pub const DEFAULT_MAX_TOOL_EXECUTIONS: usize = 64;
+
+#[cfg(feature = "realtime")]
+pub const DEFAULT_MAX_WS_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(feature = "realtime")]
+pub const DEFAULT_MAX_WS_FRAME_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(feature = "realtime")]
 pub const DEFAULT_WS_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(feature = "realtime")]
 pub const DEFAULT_CONNECTION_CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub fn validate_http_url(value: &str, allow_insecure: bool) -> Result<()> {
     validate_url(value, &["http", "https"], allow_insecure, "HTTP(S) URL")
 }
 
+#[cfg(feature = "realtime")]
 pub fn validate_ws_url(value: &str, allow_insecure: bool) -> Result<()> {
     validate_url(value, &["ws", "wss"], allow_insecure, "WebSocket URL")
 }
@@ -220,6 +233,7 @@ mod tests {
         assert!(validate_http_url("http://example.com/x", true).is_ok());
     }
 
+    #[cfg(feature = "realtime")]
     #[test]
     fn ws_url_policy_requires_secure_transport_by_default() {
         assert!(validate_ws_url("ws://example.com", false).is_err());
