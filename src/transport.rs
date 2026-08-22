@@ -9,6 +9,9 @@ use reqwest::{Client, Method, Response, StatusCode};
 use tokio::time::sleep;
 
 use crate::auth::AuthenticationProvider;
+use crate::security::{
+    DEFAULT_MAX_ERROR_BODY_BYTES, DEFAULT_MAX_RESPONSE_BYTES, mask_sensitive, validate_http_url,
+};
 use crate::{ApiError, Result, SdkError};
 
 #[derive(Debug, Clone)]
@@ -42,10 +45,19 @@ pub struct HttpConfig {
     pub timeout: Duration,
     pub connect_timeout: Duration,
     pub pool_idle_timeout: Duration,
+    pub max_response_bytes: usize,
+    pub allow_insecure: bool,
     pub user_agent: String,
     pub default_headers: HeaderMap,
     pub retry: RetryPolicy,
     pub http_client: Option<Client>,
+}
+
+impl HttpConfig {
+    pub fn allow_insecure(mut self, value: bool) -> Self {
+        self.allow_insecure = value;
+        self
+    }
 }
 
 impl Default for HttpConfig {
@@ -54,6 +66,8 @@ impl Default for HttpConfig {
             timeout: Duration::from_secs(120),
             connect_timeout: Duration::from_secs(10),
             pool_idle_timeout: Duration::from_secs(90),
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            allow_insecure: false,
             user_agent: format!("RustGLM/{}", env!("CARGO_PKG_VERSION")),
             default_headers: HeaderMap::new(),
             retry: RetryPolicy::default(),
@@ -69,6 +83,7 @@ pub(crate) struct Transport {
     authentication: AuthenticationProvider,
     headers: HeaderMap,
     retry: RetryPolicy,
+    max_response_bytes: usize,
 }
 
 impl Transport {
@@ -77,7 +92,12 @@ impl Transport {
         authentication: AuthenticationProvider,
         config: HttpConfig,
     ) -> Result<Self> {
-        let base_url = normalize_base_url(base_url)?;
+        if config.max_response_bytes == 0 {
+            return Err(SdkError::Configuration(
+                "max_response_bytes must be greater than zero".into(),
+            ));
+        }
+        let base_url = normalize_base_url(base_url, config.allow_insecure)?;
         let mut headers = config.default_headers;
         if !headers.contains_key(USER_AGENT) {
             headers.insert(
@@ -100,6 +120,7 @@ impl Transport {
             authentication,
             headers,
             retry: config.retry,
+            max_response_bytes: config.max_response_bytes,
         })
     }
 
@@ -164,7 +185,7 @@ impl Transport {
         body: &T,
         accept: &str,
     ) -> Result<Bytes> {
-        let response = self
+        let mut response = self
             .send_bytes(
                 Method::POST,
                 path,
@@ -173,7 +194,7 @@ impl Transport {
                 accept,
             )
             .await?;
-        Ok(response.bytes().await?)
+        self.read_body(&mut response, "binary").await
     }
 
     pub(crate) async fn get_json<R: for<'de> Deserialize<'de>>(&self, path: &str) -> Result<R> {
@@ -185,8 +206,8 @@ impl Transport {
 
     #[cfg_attr(not(feature = "files"), allow(dead_code))]
     pub(crate) async fn get_binary(&self, path: &str) -> Result<Bytes> {
-        let response = self.send_empty(Method::GET, path, "*/*").await?;
-        Ok(response.bytes().await?)
+        let mut response = self.send_empty(Method::GET, path, "*/*").await?;
+        self.read_body(&mut response, "binary").await
     }
 
     #[cfg_attr(not(any(feature = "files", feature = "rag")), allow(dead_code))]
@@ -294,6 +315,7 @@ impl Transport {
                 Ok(response) => return self.ensure_success(response).await,
                 Err(error)
                     if (error.is_connect() || error.is_timeout())
+                        && is_idempotent(&method)
                         && attempt < self.retry.max_retries =>
                 {
                     sleep(backoff(&self.retry, attempt)).await;
@@ -329,6 +351,7 @@ impl Transport {
                 Ok(response) => return self.ensure_success(response).await,
                 Err(error)
                     if (error.is_connect() || error.is_timeout())
+                        && is_idempotent(&method)
                         && attempt < self.retry.max_retries =>
                 {
                     sleep(backoff(&self.retry, attempt)).await;
@@ -350,7 +373,14 @@ impl Transport {
             .or_else(|| response.headers().get("x-zhipu-request-id"))
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let body = response.text().await.unwrap_or_default();
+        let mut response = response;
+        let body = match self
+            .read_body_limited(&mut response, "error", DEFAULT_MAX_ERROR_BODY_BYTES)
+            .await
+        {
+            Ok(body) => self.redact(&String::from_utf8_lossy(&body)),
+            Err(_) => String::new(),
+        };
         let value = nextjson::from_str::<Value>(&body).ok();
         let error = value
             .as_ref()
@@ -373,6 +403,7 @@ impl Transport {
             })
             .unwrap_or(&body)
             .to_owned();
+        let message = self.redact(&message);
         Err(SdkError::Api(ApiError {
             status,
             code,
@@ -383,11 +414,46 @@ impl Transport {
     }
 
     async fn decode_json<R: for<'de> Deserialize<'de>>(&self, response: Response) -> Result<R> {
-        let body = response.bytes().await?;
+        let mut response = response;
+        let body = self.read_body(&mut response, "json").await?;
         nextjson::from_slice(&body).map_err(|error| SdkError::Decode {
             message: error.to_string(),
-            body: String::from_utf8_lossy(&body).into_owned(),
+            body: self.redact(&String::from_utf8_lossy(&body)),
         })
+    }
+
+    async fn read_body(&self, response: &mut Response, kind: &'static str) -> Result<Bytes> {
+        self.read_body_limited(response, kind, self.max_response_bytes)
+            .await
+    }
+
+    async fn read_body_limited(
+        &self,
+        response: &mut Response,
+        kind: &'static str,
+        limit: usize,
+    ) -> Result<Bytes> {
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit as u64)
+        {
+            return Err(SdkError::PayloadTooLarge { kind, limit });
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if body.len().saturating_add(chunk.len()) > limit {
+                return Err(SdkError::PayloadTooLarge { kind, limit });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(Bytes::from(body))
+    }
+
+    fn redact(&self, text: &str) -> String {
+        match self.authentication.token() {
+            Ok(token) => mask_sensitive(text, &[&token]),
+            Err(_) => mask_sensitive(text, &[]),
+        }
     }
 
     fn url(&self, path: &str) -> Result<String> {
@@ -406,13 +472,9 @@ impl Transport {
     }
 }
 
-fn normalize_base_url(value: String) -> Result<String> {
+fn normalize_base_url(value: String, allow_insecure: bool) -> Result<String> {
     let value = value.trim().trim_end_matches('/');
-    if !(value.starts_with("https://") || value.starts_with("http://")) {
-        return Err(SdkError::Configuration(
-            "base URL must use http or https".into(),
-        ));
-    }
+    validate_http_url(value, allow_insecure)?;
     Ok(value.to_owned())
 }
 
@@ -462,6 +524,13 @@ fn backoff(retry: &RetryPolicy, attempt: u32) -> Duration {
         .initial_delay
         .saturating_mul(2u32.saturating_pow(attempt))
         .min(retry.max_delay)
+}
+
+fn is_idempotent(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::GET | Method::HEAD | Method::DELETE | Method::OPTIONS | Method::PUT
+    )
 }
 
 #[cfg(test)]
@@ -546,11 +615,15 @@ mod tests {
 
     #[test]
     fn validates_configuration_paths_and_backoff() {
-        assert!(normalize_base_url("ftp://example.com".into()).is_err());
+        assert!(normalize_base_url("ftp://example.com".into(), false).is_err());
         assert_eq!(
-            normalize_base_url(" https://example.com/// ".into()).unwrap(),
+            normalize_base_url(" https://example.com/// ".into(), false).unwrap(),
             "https://example.com"
         );
+        assert!(normalize_base_url("http://example.com".into(), false).is_err());
+        assert!(normalize_base_url("http://example.com".into(), true).is_ok());
+        assert!(normalize_base_url("http://localhost:8080".into(), false).is_ok());
+        assert!(normalize_base_url("https://user:pass@example.com".into(), false).is_err());
         for path in [
             "",
             " ",
@@ -583,6 +656,17 @@ mod tests {
                 "https://example.com".into(),
                 AuthenticationProvider::bearer("key").unwrap(),
                 http
+            )
+            .is_err()
+        );
+        assert!(
+            Transport::new(
+                "https://example.com".into(),
+                AuthenticationProvider::bearer("key").unwrap(),
+                HttpConfig {
+                    max_response_bytes: 0,
+                    ..HttpConfig::default()
+                }
             )
             .is_err()
         );
@@ -743,5 +827,58 @@ mod tests {
         assert!(requests[0].to_ascii_lowercase().contains("accept: audio/*"));
         assert!(requests[1].to_ascii_lowercase().contains("accept: */*"));
         assert!(requests[2].starts_with("DELETE /item "));
+    }
+
+    #[test]
+    fn only_idempotent_methods_auto_retry_connection_failures() {
+        assert!(is_idempotent(&Method::GET));
+        assert!(is_idempotent(&Method::HEAD));
+        assert!(is_idempotent(&Method::DELETE));
+        assert!(is_idempotent(&Method::OPTIONS));
+        assert!(is_idempotent(&Method::PUT));
+        assert!(!is_idempotent(&Method::POST));
+        assert!(!is_idempotent(&Method::PATCH));
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_responses_before_buffering() {
+        let (base_url, server) = mock_server(vec![MockResponse {
+            status: "200 OK",
+            headers: "Content-Type: application/json\r\n",
+            body: r#"{"data":"payload larger than the configured limit"}"#,
+        }])
+        .await;
+        let client = Transport::new(
+            base_url,
+            AuthenticationProvider::bearer("secret").unwrap(),
+            HttpConfig {
+                max_response_bytes: 32,
+                ..HttpConfig::default()
+            },
+        )
+        .unwrap();
+        let error = client.get_json::<Value>("x").await.unwrap_err();
+        assert!(matches!(error, SdkError::PayloadTooLarge { .. }));
+        assert_eq!(server.await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn non_idempotent_posts_are_not_retried_on_connection_failure() {
+        let client = Transport::new(
+            "http://127.0.0.1:1".into(),
+            AuthenticationProvider::bearer("secret").unwrap(),
+            HttpConfig {
+                retry: RetryPolicy {
+                    max_retries: 2,
+                    initial_delay: Duration::ZERO,
+                    max_delay: Duration::ZERO,
+                    ..RetryPolicy::default()
+                },
+                ..HttpConfig::default()
+            },
+        )
+        .unwrap();
+        assert!(client.post_json::<_, Value>("x", &json!({})).await.is_err());
+        assert!(client.post_json::<_, Value>("x", &json!({})).await.is_err());
     }
 }

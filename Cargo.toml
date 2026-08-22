@@ -1,6 +1,6 @@
 [package]
 name = "rustglm"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 rust-version = "1.88"
 resolver = "2"
@@ -11,7 +11,12 @@ description = "Production-oriented async Rust SDK for Zhipu GLM, Realtime, Batch
 homepage = "https://github.com/blueokanna/rustglm"
 readme = "README.md"
 keywords = ["zhipu", "chatglm", "llm", "ai", "rust-sdk"]
-categories = ["api-bindings", "web-programming::http-client"]
+categories = [
+    "api-bindings",
+    "web-programming::http-client",
+    "web-programming::web-sockets",
+    "asynchronous",
+]
 include = [
     ".cargo/config.toml",
     "src/**",
@@ -76,17 +81,14 @@ base64 = "0.23.1"
 bytes = "1.12.1"
 futures-util = "0.3.34"
 hmac = "0.13.0"
-nextjson = { version = "0.1.3", features = ["derive"] }
+nextjson = { version = "0.1.4", features = ["derive", "simd"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "multipart",
     "stream",
     "rustls",
 ] }
-# `macros` is enabled only for its `serde_json` re-export, used by the rmcp
-# interop boundary in `src/mcp.rs`; rmcp is serde-native, so the SDK keeps no
-# serde/serde_json direct dependency.
-rmcp = { version = "3.1.2", default-features = false, features = [
+rmcp = { version = "3.1.4", default-features = false, features = [
     "client",
     "macros",
     "reqwest",

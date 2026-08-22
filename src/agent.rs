@@ -2,20 +2,27 @@ use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_stream::try_stream;
 use async_trait::async_trait;
 use futures_util::Stream;
 use nextjson::{Map, Value};
 use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use tokio::time::timeout;
 
 use crate::wire_enum;
 
 use crate::client::{OpenAiCompatibleConfig, ZHIPU_BASE_URL, ZhipuConfig};
+use crate::memory::memory_context_message;
+use crate::security::{
+    DEFAULT_MAX_AGENT_STEPS, DEFAULT_MAX_MEMORY_TEXT_BYTES, DEFAULT_MAX_TOOL_EXECUTIONS,
+    DEFAULT_MAX_TOOL_OUTPUT_BYTES,
+};
 use crate::{
-    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatProvider, ConversationMemory,
-    ExtraFields, FunctionDefinition, MemoryDocument, MessageContent, Result, SdkError, Tool, Usage,
+    AgentError, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatProvider,
+    ConversationMemory, ExtraFields, FunctionDefinition, MemoryDocument, MessageContent, Result,
+    SdkError, Tool, ToolError, Usage,
 };
 
 pub type OfficialAgentStream = Pin<Box<dyn Stream<Item = Result<OfficialAgentResponse>> + Send>>;
@@ -744,9 +751,15 @@ impl AgentManifest {
             AgentProtocol::Zhipu => 1.0,
             AgentProtocol::OpenAiCompatible => 2.0,
         };
-        if !(0.0..=temperature_max).contains(&self.temperature) || self.max_steps == 0 {
+        if !(0.0..=temperature_max).contains(&self.temperature) {
             return Err(SdkError::Configuration(
-                "agent temperature or maximum steps are invalid".into(),
+                "agent temperature is invalid".into(),
+            ));
+        }
+        if self.max_steps == 0 || self.max_steps > DEFAULT_MAX_AGENT_STEPS {
+            return Err(SdkError::Configuration(
+                format!("agent maximum steps must be between 1 and {DEFAULT_MAX_AGENT_STEPS}")
+                    .into(),
             ));
         }
         if matches!(self.history, AgentHistoryPolicy::Recent { max_messages: 0 }) {
@@ -841,6 +854,10 @@ pub struct AgentRuntime {
     history: Vec<ChatMessage>,
     memory: Option<Arc<dyn ConversationMemory>>,
     recall_limit: usize,
+    run_timeout: Option<Duration>,
+    tool_timeout: Option<Duration>,
+    max_tool_executions: usize,
+    max_tool_output_bytes: usize,
 }
 
 impl AgentRuntime {
@@ -853,6 +870,10 @@ impl AgentRuntime {
             history: Vec::new(),
             memory: None,
             recall_limit: 4,
+            run_timeout: None,
+            tool_timeout: None,
+            max_tool_executions: DEFAULT_MAX_TOOL_EXECUTIONS,
+            max_tool_output_bytes: DEFAULT_MAX_TOOL_OUTPUT_BYTES,
         })
     }
 
@@ -895,6 +916,36 @@ impl AgentRuntime {
         Ok(self)
     }
 
+    pub fn run_timeout(mut self, value: Duration) -> Self {
+        self.run_timeout = Some(value);
+        self
+    }
+
+    pub fn tool_timeout(mut self, value: Duration) -> Self {
+        self.tool_timeout = Some(value);
+        self
+    }
+
+    pub fn max_tool_executions(mut self, value: usize) -> Result<Self> {
+        if value == 0 {
+            return Err(SdkError::Configuration(
+                "agent tool execution budget must be greater than zero".into(),
+            ));
+        }
+        self.max_tool_executions = value;
+        Ok(self)
+    }
+
+    pub fn max_tool_output_bytes(mut self, value: usize) -> Result<Self> {
+        if value == 0 {
+            return Err(SdkError::Configuration(
+                "agent tool output budget must be greater than zero".into(),
+            ));
+        }
+        self.max_tool_output_bytes = value;
+        Ok(self)
+    }
+
     pub fn register_tool<T>(&mut self, tool: T) -> Result<()>
     where
         T: AgentTool + 'static,
@@ -924,111 +975,137 @@ impl AgentRuntime {
         if input.trim().is_empty() {
             return Err(SdkError::Validation("agent input cannot be empty".into()));
         }
-        let mut messages = vec![ChatMessage::system(self.manifest.persona.system_prompt()?)];
-        if let Some(memory) = &self.memory {
-            let recalled = memory.recall(&input, self.recall_limit).await?;
-            if !recalled.is_empty() {
-                let values = recalled
-                    .into_iter()
-                    .map(|item| item.document.text)
-                    .collect::<Vec<_>>();
-                messages.push(ChatMessage::system(format!(
-                    "Relevant prior context:\n{}",
-                    nextjson::to_string(&values)
-                        .map_err(|error| SdkError::Validation(error.to_string().into()))?
-                )));
+        let run_timeout = self.run_timeout;
+        let runtime = self;
+        let run = async move {
+            let mut messages = vec![ChatMessage::system(
+                runtime.manifest.persona.system_prompt()?,
+            )];
+            if let Some(memory) = &runtime.memory {
+                let recalled = memory.recall(&input, runtime.recall_limit).await?;
+                if let Some(message) =
+                    memory_context_message(recalled, DEFAULT_MAX_MEMORY_TEXT_BYTES)?
+                {
+                    messages.push(message);
+                }
             }
-        }
-        messages.extend(self.history.iter().cloned());
-        messages.push(ChatMessage::user(&input));
-        let definitions = self
-            .tools
-            .values()
-            .map(|tool| Tool::function(tool.definition()))
-            .collect::<Vec<_>>();
-        let mut executions = Vec::new();
-        for step in 1..=self.manifest.max_steps {
-            let mut request = ChatCompletionRequest::new(&self.manifest.model)
-                .messages(messages.iter().cloned())
-                .temperature(self.manifest.temperature);
-            request.max_tokens = self.manifest.max_tokens;
-            if !definitions.is_empty() {
-                request.tools = Some(definitions.clone());
-            }
-            let response = self.provider.complete(request).await?;
-            let message = response
-                .choices
-                .first()
-                .map(|choice| &choice.message)
-                .ok_or_else(|| SdkError::Agent("model response contained no choices".into()))?;
-            if message.tool_calls.is_empty() {
-                self.commit_turn(&input, response.text()).await?;
-                return Ok(AgentRunResult {
-                    response,
-                    model_steps: step,
-                    tool_executions: executions,
-                });
-            }
-            let calls = message.tool_calls.clone();
-            messages.push(ChatMessage {
-                role: crate::MessageRole::Assistant,
-                content: message.content.as_ref().and_then(|content| match content {
-                    crate::ResponseContent::Text(value) => {
-                        Some(MessageContent::Text(value.to_owned()))
+            messages.extend(runtime.history.iter().cloned());
+            messages.push(ChatMessage::user(&input));
+            let definitions = runtime
+                .tools
+                .values()
+                .map(|tool| Tool::function(tool.definition()))
+                .collect::<Vec<_>>();
+            let mut executions = Vec::new();
+            for step in 1..=runtime.manifest.max_steps {
+                let mut request = ChatCompletionRequest::new(&runtime.manifest.model)
+                    .messages(messages.iter().cloned())
+                    .temperature(runtime.manifest.temperature);
+                request.max_tokens = runtime.manifest.max_tokens;
+                if !definitions.is_empty() {
+                    request.tools = Some(definitions.clone());
+                }
+                let response = runtime.provider.complete(request).await?;
+                let message = response
+                    .choices
+                    .first()
+                    .map(|choice| &choice.message)
+                    .ok_or_else(|| SdkError::Agent(AgentError::EmptyResponse))?;
+                if message.tool_calls.is_empty() {
+                    let text = response.joined_text();
+                    if text.is_none() {
+                        return Err(SdkError::Agent(AgentError::NoOutput));
                     }
-                    crate::ResponseContent::Parts(_) => None,
-                }),
-                name: None,
-                tool_call_id: None,
-                tool_calls: Some(calls.clone()),
-                reasoning_content: message.reasoning_content.clone(),
-                extra: message.extra.clone(),
-            });
-            for call in calls {
-                let function = call.function.ok_or_else(|| {
-                    SdkError::Tool(format!("tool call {} has no function payload", call.id).into())
-                })?;
-                let arguments =
-                    nextjson::from_str::<Value>(&function.arguments).map_err(|error| {
-                        SdkError::Tool(
-                            format!(
-                                "tool {} arguments are not valid JSON: {error}",
-                                function.name
-                            )
-                            .into(),
-                        )
-                    })?;
-                let tool = self.tools.get(&function.name).ok_or_else(|| {
-                    SdkError::Tool(format!("tool {} is not registered", function.name).into())
-                })?;
-                let output = tool.execute(arguments.clone()).await?;
-                let output_text = nextjson::to_string(&output)
-                    .map_err(|error| SdkError::Tool(error.to_string().into()))?;
-                messages.push(ChatMessage::tool_result(&call.id, output_text));
-                executions.push(AgentToolExecution {
-                    call_id: call.id,
-                    name: function.name,
-                    arguments,
-                    output,
+                    runtime.commit_turn(&input, text).await?;
+                    return Ok(AgentRunResult {
+                        response,
+                        model_steps: step,
+                        tool_executions: executions,
+                    });
+                }
+                let calls = message.tool_calls.clone();
+                messages.push(ChatMessage {
+                    role: crate::MessageRole::Assistant,
+                    content: message.content.as_ref().and_then(|content| match content {
+                        crate::ResponseContent::Text(value) => {
+                            Some(MessageContent::Text(value.to_owned()))
+                        }
+                        crate::ResponseContent::Parts(_) => None,
+                    }),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Some(calls.clone()),
+                    reasoning_content: message.reasoning_content.clone(),
+                    extra: message.extra.clone(),
                 });
+                for call in calls {
+                    if executions.len() >= runtime.max_tool_executions {
+                        return Err(SdkError::Agent(AgentError::BudgetExceeded(
+                            "tool execution budget exhausted",
+                        )));
+                    }
+                    let call_id = call.id;
+                    let function = call.function.ok_or_else(|| {
+                        SdkError::Tool(ToolError::InvalidArguments {
+                            tool: call_id.clone(),
+                            reason: "tool call has no function payload".into(),
+                        })
+                    })?;
+                    let arguments =
+                        nextjson::from_str::<Value>(&function.arguments).map_err(|error| {
+                            SdkError::Tool(ToolError::InvalidArguments {
+                                tool: function.name.clone(),
+                                reason: format!("arguments are not valid JSON: {error}"),
+                            })
+                        })?;
+                    let tool = runtime.tools.get(&function.name).ok_or_else(|| {
+                        SdkError::Tool(ToolError::NotRegistered(function.name.clone()))
+                    })?;
+                    let output = match runtime.tool_timeout {
+                        Some(duration) => timeout(duration, tool.execute(arguments.clone()))
+                            .await
+                            .map_err(|_| {
+                                SdkError::Timeout(
+                                    format!("tool {} timed out", function.name).into(),
+                                )
+                            })??,
+                        None => tool.execute(arguments.clone()).await?,
+                    };
+                    let output_text = nextjson::to_string(&output)
+                        .map_err(|error| SdkError::Tool(ToolError::Message(error.to_string())))?;
+                    if output_text.len() > runtime.max_tool_output_bytes {
+                        return Err(SdkError::Agent(AgentError::BudgetExceeded(
+                            "tool output budget exhausted",
+                        )));
+                    }
+                    messages.push(ChatMessage::tool_result(&call_id, output_text));
+                    executions.push(AgentToolExecution {
+                        call_id,
+                        name: function.name,
+                        arguments,
+                        output,
+                    });
+                }
             }
+            Err(SdkError::Agent(AgentError::StepLimit {
+                steps: runtime.manifest.max_steps as usize,
+            }))
+        };
+        match run_timeout {
+            Some(duration) => timeout(duration, run)
+                .await
+                .map_err(|_| SdkError::Timeout("agent run timed out".into()))?,
+            None => run.await,
         }
-        Err(SdkError::Agent(
-            format!(
-                "agent exceeded the configured {} model steps",
-                self.manifest.max_steps
-            )
-            .into(),
-        ))
     }
 
-    async fn commit_turn(&mut self, input: &str, output: Option<&str>) -> Result<()> {
+    async fn commit_turn(&mut self, input: &str, output: Option<String>) -> Result<()> {
         let Some(output) = output else {
             return Ok(());
         };
         if let AgentHistoryPolicy::Recent { max_messages } = self.manifest.history {
             self.history.push(ChatMessage::user(input));
-            self.history.push(ChatMessage::assistant(output));
+            self.history.push(ChatMessage::assistant(&output));
             let overflow = self.history.len().saturating_sub(max_messages);
             if overflow > 0 {
                 self.history.drain(..overflow);
@@ -1193,6 +1270,28 @@ mod tests {
                 .unwrap()
                 .pop_front()
                 .ok_or_else(|| SdkError::Agent("missing mock response".into()))
+        }
+
+        async fn stream(&self, _: ChatCompletionRequest) -> Result<crate::ChatStream> {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
+
+    struct SlowProvider;
+
+    #[async_trait]
+    impl ChatProvider for SlowProvider {
+        fn name(&self) -> &str {
+            "slow"
+        }
+
+        fn capabilities(&self) -> ProviderCapabilities {
+            ProviderCapabilities::openai_compatible()
+        }
+
+        async fn complete(&self, _: ChatCompletionRequest) -> Result<ChatCompletionResponse> {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok(ChatCompletionResponse::default())
         }
 
         async fn stream(&self, _: ChatCompletionRequest) -> Result<crate::ChatStream> {
@@ -1570,6 +1669,49 @@ mod tests {
         });
         let mut runtime = AgentRuntime::new(provider, manifest()).unwrap();
         assert!(matches!(runtime.run("hello").await, Err(SdkError::Tool(_))));
+    }
+
+    #[tokio::test]
+    async fn runtime_enforces_execution_budgets() {
+        let provider = Arc::new(MockProvider {
+            responses: Mutex::new(VecDeque::from([response(
+                None,
+                vec![tool_call(), tool_call()],
+            )])),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut runtime = AgentRuntime::new(provider, manifest()).unwrap();
+        runtime.register_tool(EchoTool).unwrap();
+        let mut runtime = runtime.max_tool_executions(1).unwrap();
+        assert!(matches!(
+            runtime.run("hello").await,
+            Err(SdkError::Agent(AgentError::BudgetExceeded(_)))
+        ));
+
+        let provider = Arc::new(SlowProvider);
+        let mut runtime = AgentRuntime::new(provider, manifest()).unwrap();
+        runtime.register_tool(EchoTool).unwrap();
+        let mut runtime = runtime.run_timeout(Duration::from_millis(50));
+        assert!(matches!(
+            runtime.run("hello").await,
+            Err(SdkError::Timeout(_))
+        ));
+
+        let mut oversized = tool_call();
+        oversized.function.as_mut().unwrap().arguments = format!(
+            "{{\"value\":\"{}\"}}",
+            "x".repeat(DEFAULT_MAX_TOOL_OUTPUT_BYTES + 1)
+        );
+        let provider = Arc::new(MockProvider {
+            responses: Mutex::new(VecDeque::from([response(None, vec![oversized])])),
+            requests: Mutex::new(Vec::new()),
+        });
+        let mut runtime = AgentRuntime::new(provider, manifest()).unwrap();
+        runtime.register_tool(EchoTool).unwrap();
+        assert!(matches!(
+            runtime.run("hello").await,
+            Err(SdkError::Agent(AgentError::BudgetExceeded(_)))
+        ));
     }
 
     #[tokio::test]

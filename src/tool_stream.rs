@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_stream::try_stream;
 use futures_util::{Stream, StreamExt};
-use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
+use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize, Value};
 
+use crate::security::{DEFAULT_MAX_PENDING_TOOL_CALLS, DEFAULT_MAX_TOOL_ARGUMENTS_BYTES};
 use crate::wire_enum;
 
 use crate::{
@@ -90,10 +91,13 @@ struct ToolCallAssembly {
 
 impl ToolCallAssembly {
     fn apply(&mut self, delta: &ToolCallDelta) -> Result<()> {
-        if let Some(kind) = delta.kind.as_deref().filter(|kind| *kind != "function") {
-            return Err(SdkError::Stream(
-                format!("unsupported streamed tool call type: {kind}").into(),
-            ));
+        match delta.kind.as_deref() {
+            Some(kind) if kind != "function" => {
+                return Err(SdkError::Stream(
+                    format!("unsupported streamed tool call type: {kind}").into(),
+                ));
+            }
+            Some(_) | None => {}
         }
         if let Some(id) = delta.id.as_ref().filter(|value| !value.is_empty()) {
             if self.id.as_ref().is_some_and(|current| current != id) {
@@ -113,6 +117,13 @@ impl ToolCallAssembly {
                 self.name = Some(name.clone());
             }
             if let Some(arguments) = arguments {
+                if self.arguments.len().saturating_add(arguments.len())
+                    > DEFAULT_MAX_TOOL_ARGUMENTS_BYTES
+                {
+                    return Err(SdkError::Stream(
+                        "streamed tool call arguments exceed the maximum supported size".into(),
+                    ));
+                }
                 self.arguments.push_str(arguments);
             }
         }
@@ -120,26 +131,39 @@ impl ToolCallAssembly {
     }
 
     fn complete(self, choice_index: u32, tool_index: u32) -> Result<CompletedToolCall> {
+        let id = self.id.ok_or_else(|| {
+            SdkError::Stream(
+                format!("stream ended before tool call {choice_index}:{tool_index} received an id")
+                    .into(),
+            )
+        })?;
+        let name = self.name.ok_or_else(|| {
+            SdkError::Stream(
+                format!(
+                    "stream ended before tool call {choice_index}:{tool_index} received a name"
+                )
+                .into(),
+            )
+        })?;
+        let arguments = if self.arguments.is_empty() {
+            "{}".to_owned()
+        } else {
+            nextjson::from_str::<Value>(&self.arguments).map_err(|error| {
+                SdkError::Stream(
+                    format!(
+                        "tool call {choice_index}:{tool_index} ended with invalid JSON arguments: {error}"
+                    )
+                    .into(),
+                )
+            })?;
+            self.arguments
+        };
         Ok(CompletedToolCall {
             choice_index,
             tool_index,
-            id: self.id.ok_or_else(|| {
-                SdkError::Stream(
-                    format!(
-                        "stream ended before tool call {choice_index}:{tool_index} received an id"
-                    )
-                    .into(),
-                )
-            })?,
-            name: self.name.ok_or_else(|| {
-                SdkError::Stream(
-                    format!(
-                        "stream ended before tool call {choice_index}:{tool_index} received a name"
-                    )
-                    .into(),
-                )
-            })?,
-            arguments: self.arguments,
+            id,
+            name,
+            arguments,
         })
     }
 }
@@ -147,6 +171,7 @@ impl ToolCallAssembly {
 pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
     let stream = try_stream! {
         let mut calls = BTreeMap::<(u32, u32), ToolCallAssembly>::new();
+        let mut completed = BTreeSet::<u32>::new();
 
         while let Some(chunk) = source.next().await {
             let chunk = chunk?;
@@ -154,6 +179,11 @@ pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
 
             for choice in chunk.choices {
                 let choice_index = choice.index;
+                if !choice.delta.tool_calls.is_empty() && completed.contains(&choice_index) {
+                    Err(SdkError::Stream(
+                        "tool call delta arrived after the choice completed".into(),
+                    ))?
+                }
                 if let Some(content) = choice.delta.content {
                     events.push(ToolStreamEvent::ContentDelta {
                         choice_index,
@@ -169,10 +199,13 @@ pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
 
                 for delta in choice.delta.tool_calls {
                     let tool_index = delta.index.unwrap_or(0);
-                    calls
-                        .entry((choice_index, tool_index))
-                        .or_default()
-                        .apply(&delta)?;
+                    let key = (choice_index, tool_index);
+                    if !calls.contains_key(&key) && calls.len() >= DEFAULT_MAX_PENDING_TOOL_CALLS {
+                        Err(SdkError::Stream(
+                            "stream opened too many concurrent tool calls".into(),
+                        ))?
+                    }
+                    calls.entry(key).or_default().apply(&delta)?;
                     events.push(ToolStreamEvent::ToolCallDelta(ToolCallStreamDelta {
                         choice_index,
                         tool_index,
@@ -196,6 +229,7 @@ pub(crate) fn assemble_tool_stream(mut source: ChatStream) -> ToolStream {
                             events.push(ToolStreamEvent::ToolCallCompleted(call));
                         }
                     }
+                    completed.insert(choice_index);
                     events.push(ToolStreamEvent::ChoiceCompleted {
                         choice_index,
                         reason: reason.into(),
@@ -381,6 +415,108 @@ mod tests {
             ToolStreamEvent::ToolCallCompleted(call)
                 if call.tool_index == 3 && call.name == "lookup"
         )));
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_tool_call_arguments() {
+        let oversized = "x".repeat(DEFAULT_MAX_TOOL_ARGUMENTS_BYTES + 1);
+        let chunk = ChatCompletionChunk {
+            choices: vec![ChatChunkChoice {
+                index: 0,
+                delta: ChatDelta {
+                    tool_calls: vec![ToolCallDelta {
+                        index: Some(0),
+                        id: Some("call-1".into()),
+                        function: Some(FunctionCallDelta {
+                            name: Some("lookup".into()),
+                            arguments: Some(oversized),
+                        }),
+                        ..ToolCallDelta::default()
+                    }],
+                    ..ChatDelta::default()
+                },
+                finish_reason: Some("tool_calls".into()),
+            }],
+            ..ChatCompletionChunk::default()
+        };
+        let source: ChatStream = Box::pin(stream::iter([Ok(chunk)]));
+        assert!(
+            assemble_tool_stream(source)
+                .collect::<Vec<_>>()
+                .await
+                .last()
+                .is_some_and(Result::is_err)
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_tool_deltas_after_choice_completion() {
+        let finished = chunk(ChatChunkChoice {
+            index: 0,
+            delta: ChatDelta {
+                tool_calls: vec![ToolCallDelta {
+                    index: Some(0),
+                    id: Some("call-1".into()),
+                    function: Some(FunctionCallDelta {
+                        name: Some("lookup".into()),
+                        arguments: Some("{}".into()),
+                    }),
+                    ..ToolCallDelta::default()
+                }],
+                ..ChatDelta::default()
+            },
+            finish_reason: Some("tool_calls".into()),
+        });
+        let stray = chunk(ChatChunkChoice {
+            index: 0,
+            delta: ChatDelta {
+                tool_calls: vec![ToolCallDelta {
+                    index: Some(1),
+                    id: Some("call-2".into()),
+                    function: Some(FunctionCallDelta {
+                        name: Some("lookup".into()),
+                        arguments: Some("{}".into()),
+                    }),
+                    ..ToolCallDelta::default()
+                }],
+                ..ChatDelta::default()
+            },
+            finish_reason: None,
+        });
+        let source: ChatStream = Box::pin(stream::iter([Ok(finished), Ok(stray)]));
+        let errors = assemble_tool_stream(source).collect::<Vec<_>>().await;
+        assert!(errors.iter().any(Result::is_err));
+    }
+
+    #[tokio::test]
+    async fn rejects_invalid_completed_json_arguments() {
+        let chunk = ChatCompletionChunk {
+            choices: vec![ChatChunkChoice {
+                index: 0,
+                delta: ChatDelta {
+                    tool_calls: vec![ToolCallDelta {
+                        index: Some(0),
+                        id: Some("call-1".into()),
+                        function: Some(FunctionCallDelta {
+                            name: Some("lookup".into()),
+                            arguments: Some("{\"city\":".into()),
+                        }),
+                        ..ToolCallDelta::default()
+                    }],
+                    ..ChatDelta::default()
+                },
+                finish_reason: Some("tool_calls".into()),
+            }],
+            ..ChatCompletionChunk::default()
+        };
+        let source: ChatStream = Box::pin(stream::iter([Ok(chunk)]));
+        assert!(
+            assemble_tool_stream(source)
+                .collect::<Vec<_>>()
+                .await
+                .last()
+                .is_some_and(Result::is_err)
+        );
     }
 
     #[tokio::test]

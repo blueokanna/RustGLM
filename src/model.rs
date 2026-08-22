@@ -124,6 +124,17 @@ model_marker!(
     "glm-4-flashx-250414",
     text_capabilities(false, false, false)
 );
+model_marker!(
+    Glm4Long,
+    "glm-4-long",
+    text_capabilities(false, false, false)
+);
+model_marker!(
+    Charglm4,
+    "charglm-4",
+    text_capabilities(false, false, false)
+);
+model_marker!(Emohaa, "emohaa", text_capabilities(false, false, false));
 
 model_marker!(Glm5vTurbo, "glm-5v-turbo", vision_capabilities(true));
 model_marker!(AutoGlmPhone, "autoglm-phone", vision_capabilities(false));
@@ -139,6 +150,12 @@ model_marker!(
 model_marker!(
     Glm41vThinkingFlashX,
     "glm-4.1v-thinking-flashx",
+    vision_capabilities(true)
+);
+model_marker!(GlmOcr, "glm-ocr", vision_capabilities(false));
+model_marker!(
+    Glm41vThinking,
+    "glm-4.1v-thinking",
     vision_capabilities(true)
 );
 
@@ -178,6 +195,9 @@ impl_text!(
     Glm45Flash,
     Glm4Flash250414,
     Glm4FlashX250414,
+    Glm4Long,
+    Charglm4,
+    Emohaa,
 );
 impl_vision!(
     Glm5vTurbo,
@@ -188,6 +208,8 @@ impl_vision!(
     Glm4vFlash,
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
+    GlmOcr,
+    Glm41vThinking,
 );
 impl_thinking!(
     Glm53,
@@ -209,6 +231,7 @@ impl_thinking!(
     Glm46vFlashX,
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
+    Glm41vThinking,
 );
 impl SupportsReasoningEffort for Glm53 {}
 impl SupportsReasoningEffort for Glm52 {}
@@ -228,6 +251,9 @@ impl_tools!(
     Glm45Flash,
     Glm4Flash250414,
     Glm4FlashX250414,
+    Glm4Long,
+    Charglm4,
+    Emohaa,
     Glm5vTurbo,
     AutoGlmPhone,
     Glm46v,
@@ -236,6 +262,8 @@ impl_tools!(
     Glm4vFlash,
     Glm41vThinkingFlash,
     Glm41vThinkingFlashX,
+    GlmOcr,
+    Glm41vThinking,
 );
 impl_tool_stream!(
     Glm53,
@@ -506,6 +534,9 @@ mod tests {
             model_descriptor::<Glm45Flash>(),
             model_descriptor::<Glm4Flash250414>(),
             model_descriptor::<Glm4FlashX250414>(),
+            model_descriptor::<Glm4Long>(),
+            model_descriptor::<Charglm4>(),
+            model_descriptor::<Emohaa>(),
             model_descriptor::<Glm5vTurbo>(),
             model_descriptor::<AutoGlmPhone>(),
             model_descriptor::<Glm46v>(),
@@ -514,6 +545,8 @@ mod tests {
             model_descriptor::<Glm4vFlash>(),
             model_descriptor::<Glm41vThinkingFlash>(),
             model_descriptor::<Glm41vThinkingFlashX>(),
+            model_descriptor::<GlmOcr>(),
+            model_descriptor::<Glm41vThinking>(),
         ];
         let ids = models.iter().map(|(id, _)| *id).collect::<Vec<_>>();
         assert_eq!(
@@ -534,6 +567,9 @@ mod tests {
                 "glm-4.5-flash",
                 "glm-4-flash-250414",
                 "glm-4-flashx-250414",
+                "glm-4-long",
+                "charglm-4",
+                "emohaa",
                 "glm-5v-turbo",
                 "autoglm-phone",
                 "glm-4.6v",
@@ -542,14 +578,16 @@ mod tests {
                 "glm-4v-flash",
                 "glm-4.1v-thinking-flash",
                 "glm-4.1v-thinking-flashx",
+                "glm-ocr",
+                "glm-4.1v-thinking",
             ]
         );
         assert!(models[0].1.reasoning_effort);
         assert!(models[0].1.tool_stream);
         assert!(models[1].1.reasoning_effort);
         assert!(models[1].1.tool_stream);
-        assert!(models[15].1.vision);
-        assert!(!models[15].1.tool_stream);
+        assert!(models[18].1.vision);
+        assert!(!models[18].1.tool_stream);
         assert!(!model_descriptor::<Glm47Flash>().1.tool_stream);
     }
 

@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -150,7 +150,7 @@ enum AuthenticationState {
 
 struct CachedToken {
     value: String,
-    refresh_at_millis: u64,
+    refresh_at: Instant,
 }
 
 impl AuthenticationProvider {
@@ -195,7 +195,7 @@ impl AuthenticationProvider {
         })
     }
 
-    fn token(&self) -> Result<String> {
+    pub(crate) fn token(&self) -> Result<String> {
         match self.inner.as_ref() {
             AuthenticationState::Static(value) => Ok(value.trim().to_owned()),
             AuthenticationState::Jwt { config, cache } => {
@@ -204,23 +204,22 @@ impl AuthenticationProvider {
                     let mut cache = cache.lock().map_err(|_| {
                         SdkError::Configuration("JWT cache lock is poisoned".into())
                     })?;
-                    if let Some(token) =
-                        cache.as_ref().filter(|token| now < token.refresh_at_millis)
+                    if let Some(token) = cache
+                        .as_ref()
+                        .filter(|token| Instant::now() < token.refresh_at)
                     {
                         return Ok(token.value.clone());
                     }
                     let value = generate_token_at(config, now)?;
-                    let refresh_at_millis = now
-                        .checked_add(duration_millis(config.token_ttl)?)
-                        .and_then(|value| {
-                            value.checked_sub(duration_millis(config.refresh_before).ok()?)
-                        })
+                    let refresh_at = Instant::now()
+                        .checked_add(config.token_ttl)
+                        .and_then(|value| value.checked_sub(config.refresh_before))
                         .ok_or_else(|| {
                             SdkError::Configuration("JWT refresh time overflow".into())
                         })?;
                     *cache = Some(CachedToken {
                         value: value.clone(),
-                        refresh_at_millis,
+                        refresh_at,
                     });
                     Ok(value)
                 } else {

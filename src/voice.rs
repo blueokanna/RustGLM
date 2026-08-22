@@ -2,6 +2,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use nextjson::{NsonDeserialize as Deserialize, NsonSerialize as Serialize};
 
+use crate::security::truncate;
 use crate::{
     ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ContentPart, MessageRole, Result,
     SdkError,
@@ -9,6 +10,9 @@ use crate::{
 
 pub const GLM_4_VOICE_MODEL: &str = "glm-4-voice";
 pub const GLM_4_VOICE_OUTPUT_SAMPLE_RATE: u32 = 44_100;
+pub const GLM_TTS_MODEL: &str = "glm-tts";
+pub const GLM_TTS_CLONE_MODEL: &str = "glm-tts-clone";
+pub const GLM_ASR_MODEL: &str = "glm-asr-2512";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(transparent)]
@@ -93,7 +97,7 @@ impl ChatCompletionResponse {
             .map(|data| {
                 STANDARD.decode(data).map_err(|error| SdkError::Decode {
                     message: format!("GLM-4-Voice audio is not valid base64: {error}"),
-                    body: data.to_owned(),
+                    body: truncate(data, 1024),
                 })
             })
             .transpose()

@@ -28,6 +28,8 @@ use crate::agent::official_agent_stream;
 use crate::agent::retrieval_agent_stream;
 use crate::auth::AuthenticationProvider;
 use crate::provider::{ChatProvider, ChatStream, ProviderCapabilities};
+#[cfg(feature = "tools")]
+use crate::security::validate_http_url;
 use crate::transport::Transport;
 #[cfg(feature = "agents")]
 use crate::{
@@ -53,6 +55,8 @@ use crate::{DeleteResponse, FileList, FileObject, FileUploadRequest};
 use crate::{Glm4VoiceRequest, SpeechRequest, TranscriptionRequest, TranscriptionResponse};
 #[cfg(feature = "images")]
 use crate::{ImageGenerationRequest, ImageGenerationResponse};
+#[cfg(feature = "tools")]
+use crate::{ModerationInput, ModerationItem, ModerationRequest, ModerationResponse};
 #[cfg(feature = "rag")]
 use crate::{RetrievalAgentRequest, RetrievalAgentStream};
 
@@ -449,6 +453,15 @@ impl ZhipuClient {
 
     #[cfg(feature = "tools")]
     pub async fn moderate(&self, request: &Value) -> Result<Value> {
+        self.transport.post_json("moderations", request).await
+    }
+
+    #[cfg(feature = "tools")]
+    pub async fn moderate_content(
+        &self,
+        request: &ModerationRequest,
+    ) -> Result<ModerationResponse> {
+        validate_moderation(request)?;
         self.transport.post_json("moderations", request).await
     }
 
@@ -881,6 +894,72 @@ fn validate_image(request: &ImageGenerationRequest) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "tools")]
+fn validate_moderation(request: &ModerationRequest) -> Result<()> {
+    if request.model.trim().is_empty() {
+        return Err(SdkError::Validation(
+            "moderation model cannot be empty".into(),
+        ));
+    }
+    match &request.input {
+        ModerationInput::Text(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(SdkError::Validation(
+                    "moderation text cannot be empty".into(),
+                ));
+            }
+            if value.chars().count() > crate::MODERATION_TEXT_LIMIT {
+                return Err(SdkError::Validation(
+                    "moderation text exceeds the 2000 character limit".into(),
+                ));
+            }
+        }
+        ModerationInput::Item(item) => validate_moderation_item(item)?,
+        ModerationInput::Items(items) => {
+            if items.is_empty() {
+                return Err(SdkError::Validation(
+                    "moderation items cannot be empty".into(),
+                ));
+            }
+            for item in items {
+                validate_moderation_item(item)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "tools")]
+fn validate_moderation_item(item: &ModerationItem) -> Result<()> {
+    match item {
+        ModerationItem::Text { text } => {
+            if text.trim().is_empty() {
+                return Err(SdkError::Validation(
+                    "moderation text cannot be empty".into(),
+                ));
+            }
+            if text.chars().count() > crate::MODERATION_TEXT_LIMIT {
+                return Err(SdkError::Validation(
+                    "moderation text exceeds the 2000 character limit".into(),
+                ));
+            }
+        }
+        ModerationItem::ImageUrl { image_url }
+        | ModerationItem::AudioUrl {
+            audio_url: image_url,
+        }
+        | ModerationItem::VideoUrl {
+            video_url: image_url,
+        } => {
+            validate_http_url(&image_url.url, true).map_err(|error| {
+                SdkError::Validation(format!("invalid moderation URL: {error}").into())
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn require_id(value: &str, name: &str) -> Result<()> {
     if value.trim().is_empty() {
         return Err(SdkError::Validation(
@@ -893,9 +972,12 @@ fn require_id(value: &str, name: &str) -> Result<()> {
 const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
 
 pub(crate) fn encode_component(value: &str) -> String {
+    if value.bytes().all(is_unreserved) {
+        return value.to_owned();
+    }
     let mut output = String::with_capacity(value.len());
     for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+        if is_unreserved(byte) {
             output.push(byte as char);
         } else {
             output.push('%');
@@ -904,6 +986,10 @@ pub(crate) fn encode_component(value: &str) -> String {
         }
     }
     output
+}
+
+fn is_unreserved(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~')
 }
 
 #[cfg(all(
@@ -1735,6 +1821,53 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn moderation_validates_text_items_and_urls_before_io() {
+        let client = ZhipuConfig::new("key")
+            .base_url("http://127.0.0.1:1")
+            .build()
+            .unwrap();
+        assert!(matches!(
+            client
+                .moderate_content(&ModerationRequest::new_text(" "))
+                .await,
+            Err(SdkError::Validation(_))
+        ));
+        assert!(matches!(
+            client
+                .moderate_content(&ModerationRequest::new_text("x".repeat(2001)))
+                .await,
+            Err(SdkError::Validation(_))
+        ));
+        assert!(matches!(
+            client
+                .moderate_content(&ModerationRequest::new_item(ModerationItem::image_url(
+                    "file:///etc/passwd"
+                )))
+                .await,
+            Err(SdkError::Validation(_))
+        ));
+        assert!(matches!(
+            client
+                .moderate_content(&ModerationRequest::new_items([]))
+                .await,
+            Err(SdkError::Validation(_))
+        ));
+        let valid_text = client
+            .moderate_content(&ModerationRequest::new_text("ok"))
+            .await
+            .unwrap_err();
+        assert!(!matches!(valid_text, SdkError::Validation(_)));
+        let valid_items = client
+            .moderate_content(&ModerationRequest::new_items([
+                ModerationItem::text("ok"),
+                ModerationItem::video_url("https://example.com/a.mp4"),
+            ]))
+            .await
+            .unwrap_err();
+        assert!(!matches!(valid_items, SdkError::Validation(_)));
+    }
+
     #[test]
     fn client_configuration_rejects_invalid_values() {
         assert!(ZhipuClient::new("").is_err());
@@ -1755,6 +1888,25 @@ mod tests {
                 .base_url("invalid")
                 .build()
                 .is_err()
+        );
+        assert!(
+            ZhipuConfig::new("key")
+                .base_url("http://example.com")
+                .build()
+                .is_err()
+        );
+        assert!(
+            ZhipuConfig::new("key")
+                .base_url("http://localhost:8080")
+                .build()
+                .is_ok()
+        );
+        assert!(
+            ZhipuConfig::new("key")
+                .base_url("http://example.com")
+                .http(HttpConfig::default().allow_insecure(true))
+                .build()
+                .is_ok()
         );
     }
 }

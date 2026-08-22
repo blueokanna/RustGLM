@@ -7,6 +7,7 @@ use reqwest::multipart::{Form, Part};
 use crate::wire_enum;
 
 use crate::client::encode_component;
+use crate::security::validate_http_url;
 use crate::{RagError, Result, ValidationError, ZhipuClient};
 
 const KNOWLEDGE_PATH: &str = "llm-application/open/knowledge";
@@ -645,6 +646,9 @@ impl ZhipuClient {
         {
             return Err(RagError::EmptyKnowledgeName.into());
         }
+        if let Some(callback_url) = request.callback_url.as_deref() {
+            validate_remote_url(callback_url, "callback_url")?;
+        }
         self.agent_transport
             .request_json(
                 Method::PUT,
@@ -744,6 +748,7 @@ impl ZhipuClient {
             form = form.text("parse_image", value.to_string());
         }
         if let Some(value) = request.callback_url {
+            validate_remote_url(&value, "callback_url")?;
             form = form.text("callback_url", value);
         }
         if !request.callback_header.is_empty() {
@@ -783,16 +788,11 @@ impl ZhipuClient {
             }
             .into());
         }
-        if request
-            .upload_detail
-            .iter()
-            .any(|document| document.url.trim().is_empty())
-        {
-            return Err(RagError::InvalidField {
-                field: "upload_detail.url",
-                reason: "cannot be empty".into(),
+        for document in &request.upload_detail {
+            validate_remote_url(&document.url, "upload_detail.url")?;
+            if let Some(callback_url) = document.callback_url.as_deref() {
+                validate_remote_url(callback_url, "upload_detail.callback_url")?;
             }
-            .into());
         }
         self.agent_transport
             .post_json(&format!("{DOCUMENT_PATH}/upload_url"), request)
@@ -830,6 +830,9 @@ impl ZhipuClient {
         request: &ReEmbeddingRequest,
     ) -> Result<RagOperationResponse> {
         require_rag_id(id, "document id")?;
+        if let Some(callback_url) = request.callback_url.as_deref() {
+            validate_remote_url(callback_url, "callback_url")?;
+        }
         self.agent_transport
             .post_json(
                 &format!("{DOCUMENT_PATH}/embedding/{}", encode_component(id)),
@@ -844,6 +847,15 @@ fn validate_pagination(page: u32, size: u32) -> Result<()> {
         return Err(RagError::InvalidPagination.into());
     }
     Ok(())
+}
+
+fn validate_remote_url(value: &str, field: &'static str) -> Result<()> {
+    Ok(
+        validate_http_url(value, true).map_err(|error| RagError::InvalidField {
+            field,
+            reason: error.to_string(),
+        })?,
+    )
 }
 
 fn validate_retrieval(request: &KnowledgeRetrieveRequest) -> Result<()> {

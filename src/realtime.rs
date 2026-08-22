@@ -13,15 +13,23 @@ use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 use crate::auth::AuthenticationProvider;
+use crate::security::{
+    DEFAULT_CONNECTION_CLOSE_TIMEOUT, DEFAULT_MAX_WS_FRAME_BYTES, DEFAULT_MAX_WS_MESSAGE_BYTES,
+    DEFAULT_WS_WRITE_TIMEOUT, truncate, validate_ws_url,
+};
 use crate::{Result, SdkError, ZhipuAuthentication};
 
 mod events;
 pub use events::*;
 
 pub const ZHIPU_REALTIME_URL: &str = "wss://open.bigmodel.cn/api/paas/v4/realtime";
+pub const GLM_REALTIME_MODEL: &str = "glm-realtime";
+pub const GLM_REALTIME_FLASH_MODEL: &str = "glm-realtime-flash";
+pub const GLM_REALTIME_AIR_MODEL: &str = "glm-realtime-air";
 
 type RealtimeSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -33,6 +41,9 @@ pub struct RealtimeConfig {
     pub url: String,
     pub connect_timeout: Duration,
     pub channel_capacity: usize,
+    pub allow_insecure: bool,
+    pub max_message_bytes: usize,
+    pub max_frame_bytes: usize,
 }
 
 impl RealtimeConfig {
@@ -42,6 +53,9 @@ impl RealtimeConfig {
             url: ZHIPU_REALTIME_URL.into(),
             connect_timeout: Duration::from_secs(15),
             channel_capacity: 256,
+            allow_insecure: false,
+            max_message_bytes: DEFAULT_MAX_WS_MESSAGE_BYTES,
+            max_frame_bytes: DEFAULT_MAX_WS_FRAME_BYTES,
         }
     }
 
@@ -65,6 +79,21 @@ impl RealtimeConfig {
         self
     }
 
+    pub fn allow_insecure(mut self, value: bool) -> Self {
+        self.allow_insecure = value;
+        self
+    }
+
+    pub fn max_message_bytes(mut self, value: usize) -> Self {
+        self.max_message_bytes = value;
+        self
+    }
+
+    pub fn max_frame_bytes(mut self, value: usize) -> Self {
+        self.max_frame_bytes = value;
+        self
+    }
+
     pub async fn connect(self) -> Result<RealtimeConnection> {
         RealtimeClient::from_config(self).await
     }
@@ -78,14 +107,15 @@ impl RealtimeClient {
     }
 
     pub async fn from_config(config: RealtimeConfig) -> Result<RealtimeConnection> {
-        if !(config.url.starts_with("wss://") || config.url.starts_with("ws://")) {
-            return Err(SdkError::Configuration(
-                "realtime URL must use ws or wss".into(),
-            ));
-        }
+        validate_ws_url(&config.url, config.allow_insecure)?;
         if config.connect_timeout.is_zero() || config.channel_capacity == 0 {
             return Err(SdkError::Configuration(
                 "realtime timeout and channel capacity must be greater than zero".into(),
+            ));
+        }
+        if config.max_message_bytes == 0 || config.max_frame_bytes == 0 {
+            return Err(SdkError::Configuration(
+                "realtime message and frame limits must be greater than zero".into(),
             ));
         }
         let authentication = AuthenticationProvider::zhipu(config.authentication)?;
@@ -99,9 +129,13 @@ impl RealtimeClient {
                 .parse()
                 .map_err(|_| SdkError::Configuration("authentication header is invalid".into()))?,
         );
+        let websocket = WebSocketConfig::default();
+        let mut websocket = websocket;
+        websocket.max_message_size = Some(config.max_message_bytes);
+        websocket.max_frame_size = Some(config.max_frame_bytes);
         let (socket, _) = timeout(
             config.connect_timeout,
-            tokio_tungstenite::connect_async(request),
+            tokio_tungstenite::connect_async_with_config(request, Some(websocket), false),
         )
         .await
         .map_err(|_| SdkError::Timeout("realtime connection timed out".into()))??;
@@ -136,7 +170,7 @@ pub struct RealtimeSession {
 impl Default for RealtimeSession {
     fn default() -> Self {
         Self {
-            model: "glm-realtime".into(),
+            model: GLM_REALTIME_MODEL.into(),
             modalities: vec!["text".into(), "audio".into()],
             instructions: None,
             voice: "tongtong".into(),
@@ -768,8 +802,9 @@ impl RealtimeConnection {
 
     pub async fn close(self) -> Result<()> {
         self.sender.close().await?;
-        self.task
+        timeout(DEFAULT_CONNECTION_CLOSE_TIMEOUT, self.task)
             .await
+            .map_err(|_| SdkError::Timeout("realtime connection close timed out".into()))?
             .map_err(|error| SdkError::Stream(error.to_string().into()))?;
         Ok(())
     }
@@ -780,13 +815,45 @@ fn spawn_connection(socket: RealtimeSocket, capacity: usize) -> RealtimeConnecti
     let (events_tx, events_rx) = mpsc::channel(capacity);
     let task = tokio::spawn(async move {
         let (mut sink, mut stream) = socket.split();
+        let mut overflow_notified = false;
+        let push_event =
+            |event: Result<RealtimeServerEvent>, overflow_notified: &mut bool| -> bool {
+                match events_tx.try_send(event) {
+                    Ok(()) => {
+                        *overflow_notified = false;
+                        true
+                    }
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        if !*overflow_notified {
+                            *overflow_notified = true;
+                            let _ = events_tx.try_send(Err(SdkError::Stream(
+                                "realtime event queue overflow; events were dropped".into(),
+                            )));
+                        }
+                        true
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => false,
+                }
+            };
         loop {
             tokio::select! {
                 command = commands_rx.recv() => match command {
                     Some(RealtimeCommand::Send(message)) => {
-                        if let Err(error) = sink.send(message).await {
-                            let _ = events_tx.send(Err(error.into())).await;
-                            break;
+                        match timeout(DEFAULT_WS_WRITE_TIMEOUT, sink.send(message)).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                push_event(Err(error.into()), &mut overflow_notified);
+                                break;
+                            }
+                            Err(_) => {
+                                push_event(
+                                    Err(SdkError::Timeout(
+                                        "realtime socket write timed out".into(),
+                                    )),
+                                    &mut overflow_notified,
+                                );
+                                break;
+                            }
                         }
                     }
                     Some(RealtimeCommand::Close) | None => {
@@ -797,32 +864,48 @@ fn spawn_connection(socket: RealtimeSocket, capacity: usize) -> RealtimeConnecti
                 message = stream.next() => match message {
                     Some(Ok(Message::Text(text))) => {
                         let event = nextjson::from_str(&text).map_err(|error| {
-                            SdkError::Stream(format!("{error}: {text}").into())
+                            SdkError::Stream(
+                                format!("{error}: {}", truncate(&text, 512)).into(),
+                            )
                         });
-                        if events_tx.send(event).await.is_err() {
+                        if !push_event(event, &mut overflow_notified) {
                             break;
                         }
                     }
                     Some(Ok(Message::Binary(bytes))) => {
                         let event = nextjson::from_slice(&bytes).map_err(|error| {
                             SdkError::Stream(
-                                format!("{error}: {}", String::from_utf8_lossy(&bytes)).into(),
+                                format!("{error}: binary payload of {} bytes", bytes.len()).into(),
                             )
                         });
-                        if events_tx.send(event).await.is_err() {
+                        if !push_event(event, &mut overflow_notified) {
                             break;
                         }
                     }
                     Some(Ok(Message::Ping(bytes))) => {
-                        if let Err(error) = sink.send(Message::Pong(bytes)).await {
-                            let _ = events_tx.send(Err(error.into())).await;
-                            break;
+                        match timeout(DEFAULT_WS_WRITE_TIMEOUT, sink.send(Message::Pong(bytes)))
+                            .await
+                        {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => {
+                                push_event(Err(error.into()), &mut overflow_notified);
+                                break;
+                            }
+                            Err(_) => {
+                                push_event(
+                                    Err(SdkError::Timeout(
+                                        "realtime pong write timed out".into(),
+                                    )),
+                                    &mut overflow_notified,
+                                );
+                                break;
+                            }
                         }
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => {}
                     Some(Err(error)) => {
-                        let _ = events_tx.send(Err(error.into())).await;
+                        push_event(Err(error.into()), &mut overflow_notified);
                         break;
                     }
                 }

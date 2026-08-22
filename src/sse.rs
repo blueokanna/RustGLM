@@ -12,11 +12,12 @@ use std::marker::PhantomData;
 
 use nextjson::NsonDeserialize as Deserialize;
 
+use crate::security::{DEFAULT_MAX_SSE_DATA_LINES, DEFAULT_MAX_SSE_EVENT_BYTES};
 use crate::{Result, SdkError};
 
 /// Upper bound for a single in-flight SSE event. Guards against unbounded buffer growth when a
 /// peer sends a pathologically long line without a terminator.
-const MAX_EVENT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_EVENT_BYTES: usize = DEFAULT_MAX_SSE_EVENT_BYTES;
 
 /// Streaming SSE decoder with zero-copy line parsing and bounded memory.
 pub(crate) struct SseDecoder<T> {
@@ -26,6 +27,7 @@ pub(crate) struct SseDecoder<T> {
     event: Vec<u8>,
     /// Buffer range of the current single-line `data:` payload while it is still contiguous.
     single: Option<(usize, usize)>,
+    data_lines: u32,
     done: bool,
     marker: PhantomData<T>,
 }
@@ -37,6 +39,7 @@ impl<T> Default for SseDecoder<T> {
             consumed: 0,
             event: Vec::new(),
             single: None,
+            data_lines: 0,
             done: false,
             marker: PhantomData,
         }
@@ -51,7 +54,8 @@ impl<T: for<'de> Deserialize<'de>> SseDecoder<T> {
         if self.done {
             return Ok(Vec::new());
         }
-        if self.buffer.len().saturating_add(bytes.len()) > MAX_EVENT_BYTES {
+        let in_flight = self.buffer.len().saturating_add(self.event.len());
+        if in_flight.saturating_add(bytes.len()) > MAX_EVENT_BYTES {
             return Err(SdkError::Stream(
                 "SSE event exceeds the maximum supported size".into(),
             ));
@@ -80,14 +84,14 @@ impl<T: for<'de> Deserialize<'de>> SseDecoder<T> {
                     break;
                 }
             } else if let Some((start, end)) = data_range(line, line_start + line.len()) {
-                self.append_data(start, end);
+                self.append_data(start, end)?;
             }
         }
         if finish {
             if cursor < self.buffer.len() {
                 let line = trim_cr(&self.buffer[cursor..]);
                 if let Some((start, end)) = data_range(line, cursor + line.len()) {
-                    self.append_data(start, end);
+                    self.append_data(start, end)?;
                 }
                 cursor = self.buffer.len();
             }
@@ -103,7 +107,13 @@ impl<T: for<'de> Deserialize<'de>> SseDecoder<T> {
         Ok(values)
     }
 
-    fn append_data(&mut self, start: usize, end: usize) {
+    fn append_data(&mut self, start: usize, end: usize) -> Result<()> {
+        if self.data_lines >= DEFAULT_MAX_SSE_DATA_LINES as u32 {
+            return Err(SdkError::Stream(
+                "SSE event exceeds the maximum supported data line count".into(),
+            ));
+        }
+        self.data_lines += 1;
         if let Some((first_start, first_end)) = self.single.take() {
             // A second `data:` line arrived: materialize the deferred first payload.
             let first = &self.buffer[first_start..first_end];
@@ -117,9 +127,11 @@ impl<T: for<'de> Deserialize<'de>> SseDecoder<T> {
             let payload = &self.buffer[start..end];
             self.event.extend_from_slice(payload);
         }
+        Ok(())
     }
 
     fn consume_event(&mut self, values: &mut Vec<T>) -> Result<()> {
+        self.data_lines = 0;
         if let Some((start, end)) = self.single.take() {
             if start == end {
                 return Ok(());
@@ -220,5 +232,20 @@ mod tests {
         let mut decoder = decoder();
         let oversized = vec![b'a'; MAX_EVENT_BYTES + 1];
         assert!(matches!(decoder.push(&oversized), Err(SdkError::Stream(_))));
+    }
+
+    #[test]
+    fn rejects_oversized_multi_line_events() {
+        let mut decoder = decoder();
+        let first = vec![b'b'; MAX_EVENT_BYTES / 2];
+        let mut line = b"data: ".to_vec();
+        line.extend_from_slice(&first);
+        line.extend_from_slice(b"\n");
+        assert!(decoder.push(&line).unwrap().is_empty());
+        let second = vec![b'c'; MAX_EVENT_BYTES / 2];
+        let mut line = b"data: ".to_vec();
+        line.extend_from_slice(&second);
+        line.extend_from_slice(b"\n");
+        assert!(matches!(decoder.push(&line), Err(SdkError::Stream(_))));
     }
 }

@@ -131,8 +131,12 @@ impl From<&str> for UnsupportedError {
 pub enum AgentError {
     #[error("agent response contained no choices")]
     EmptyResponse,
+    #[error("agent response contained no text and no tool calls")]
+    NoOutput,
     #[error("agent stopped after {steps} steps")]
     StepLimit { steps: usize },
+    #[error("agent exceeded its execution budget: {0}")]
+    BudgetExceeded(&'static str),
     #[error("{0}")]
     Message(String),
 }
@@ -226,6 +230,8 @@ pub enum SdkError {
     Api(#[from] ApiError),
     #[error("response decode error: {message}")]
     Decode { message: String, body: String },
+    #[error("response payload exceeded the {limit} byte limit while reading {kind}")]
+    PayloadTooLarge { kind: &'static str, limit: usize },
     #[error("stream error: {0}")]
     Stream(#[from] StreamError),
     #[cfg(feature = "realtime")]

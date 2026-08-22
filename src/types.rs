@@ -75,6 +75,7 @@ pub struct MediaUrl {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputAudio {
+    #[njson(sensitive)]
     pub data: String,
     pub format: String,
 }
@@ -583,6 +584,8 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub watermark_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
@@ -643,6 +646,11 @@ impl ChatCompletionRequest {
         self
     }
 
+    pub fn watermark_enabled(mut self, value: bool) -> Self {
+        self.watermark_enabled = Some(value);
+        self
+    }
+
     pub fn request_id(mut self, value: impl Into<String>) -> Self {
         self.request_id = Some(value.into());
         self
@@ -686,6 +694,15 @@ impl ChatCompletionResponse {
     pub fn text(&self) -> Option<&str> {
         self.choices.first()?.message.content.as_ref()?.as_text()
     }
+
+    pub fn joined_text(&self) -> Option<String> {
+        self.choices
+            .first()?
+            .message
+            .content
+            .as_ref()?
+            .joined_text()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -727,6 +744,27 @@ impl ResponseContent {
             Self::Parts(_) => None,
         }
     }
+
+    pub fn joined_text(&self) -> Option<String> {
+        match self {
+            Self::Text(value) => {
+                if value.is_empty() {
+                    None
+                } else {
+                    Some(value.clone())
+                }
+            }
+            Self::Parts(parts) => {
+                let mut text = String::new();
+                for part in parts {
+                    if let Some(value) = part.text.as_deref() {
+                        text.push_str(value);
+                    }
+                }
+                if text.is_empty() { None } else { Some(text) }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -743,6 +781,7 @@ pub struct ResponseContentPart {
 pub struct AudioContent {
     #[serde(default)]
     pub id: Option<String>,
+    #[njson(sensitive)]
     #[serde(default)]
     pub data: Option<String>,
     #[serde(default)]
@@ -956,6 +995,10 @@ pub struct EmbeddingData {
     pub embedding: Vec<f32>,
 }
 
+pub const GLM_IMAGE_MODEL: &str = "glm-image";
+pub const COGVIEW_4_MODEL: &str = "cogview-4";
+pub const COGVIEW_3_FLASH_MODEL: &str = "cogview-3-flash";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ImageGenerationRequest {
     pub model: String,
@@ -1015,11 +1058,17 @@ pub struct ImageGenerationResponse {
 pub struct GeneratedImage {
     #[serde(default)]
     pub url: Option<String>,
+    #[njson(sensitive)]
     #[serde(default)]
     pub b64_json: Option<String>,
     #[serde(flatten, default)]
     pub extra: ExtraFields,
 }
+
+pub const COGVIDEOX_3_MODEL: &str = "cogvideox-3";
+pub const COGVIDEOX_FLASH_MODEL: &str = "cogvideox-flash";
+pub const VIDU_Q1_MODEL: &str = "vidu-q1";
+pub const VIDU_2_MODEL: &str = "vidu-2";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct VideoGenerationRequest {
@@ -1511,6 +1560,151 @@ pub struct BatchList {
     pub has_more: bool,
 }
 
+pub const MODERATION_MODEL: &str = "moderation";
+pub const MODERATION_TEXT_LIMIT: usize = 2_000;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModerationItem {
+    Text { text: String },
+    ImageUrl { image_url: MediaUrl },
+    AudioUrl { audio_url: MediaUrl },
+    VideoUrl { video_url: MediaUrl },
+}
+
+impl ModerationItem {
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::Text { text: value.into() }
+    }
+
+    pub fn image_url(value: impl Into<String>) -> Self {
+        Self::ImageUrl {
+            image_url: MediaUrl { url: value.into() },
+        }
+    }
+
+    pub fn audio_url(value: impl Into<String>) -> Self {
+        Self::AudioUrl {
+            audio_url: MediaUrl { url: value.into() },
+        }
+    }
+
+    pub fn video_url(value: impl Into<String>) -> Self {
+        Self::VideoUrl {
+            video_url: MediaUrl { url: value.into() },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ModerationInput {
+    Text(String),
+    Item(ModerationItem),
+    Items(Vec<ModerationItem>),
+}
+
+impl ModerationInput {
+    pub fn text(value: impl Into<String>) -> Self {
+        Self::Text(value.into())
+    }
+
+    pub fn item(value: ModerationItem) -> Self {
+        Self::Item(value)
+    }
+
+    pub fn items(values: impl IntoIterator<Item = ModerationItem>) -> Self {
+        Self::Items(values.into_iter().collect())
+    }
+
+    pub fn text_content(&self) -> Option<&str> {
+        match self {
+            Self::Text(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModerationRequest {
+    #[serde(default = "default_moderation_model")]
+    pub model: String,
+    pub input: ModerationInput,
+}
+
+impl ModerationRequest {
+    pub fn new_text(value: impl Into<String>) -> Self {
+        Self {
+            model: MODERATION_MODEL.into(),
+            input: ModerationInput::text(value),
+        }
+    }
+
+    pub fn new_item(value: ModerationItem) -> Self {
+        Self {
+            model: MODERATION_MODEL.into(),
+            input: ModerationInput::item(value),
+        }
+    }
+
+    pub fn new_items(values: impl IntoIterator<Item = ModerationItem>) -> Self {
+        Self {
+            model: MODERATION_MODEL.into(),
+            input: ModerationInput::items(values),
+        }
+    }
+}
+
+fn default_moderation_model() -> String {
+    MODERATION_MODEL.into()
+}
+
+wire_enum! {
+    /// Assessed risk level for moderated content.
+    pub enum RiskLevel {
+        Pass => "PASS",
+        Review => "REVIEW",
+        Reject => "REJECT",
+        Unknown => "unknown",
+        ; _ => Unknown
+    }
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for RiskLevel {
+    fn default() -> Self {
+        Self::Pass
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ModerationResult {
+    #[serde(default)]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub risk_level: Option<RiskLevel>,
+    #[serde(default)]
+    pub risk_type: Option<Vec<String>>,
+    #[serde(flatten, default)]
+    pub extra: ExtraFields,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ModerationResponse {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub created: Option<u64>,
+    #[serde(default)]
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub result_list: Option<Vec<ModerationResult>>,
+    #[serde(default)]
+    pub usage: Option<Value>,
+    #[serde(flatten, default)]
+    pub extra: ExtraFields,
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -1717,6 +1911,47 @@ mod tests {
     }
 
     #[test]
+    fn joined_text_handles_parts_and_skips_non_text() {
+        let parts = ResponseContent::Parts(vec![
+            ResponseContentPart {
+                kind: "text".into(),
+                text: Some("Hello ".into()),
+                extra: Map::new(),
+            },
+            ResponseContentPart {
+                kind: "image_url".into(),
+                text: None,
+                extra: Map::new(),
+            },
+            ResponseContentPart {
+                kind: "text".into(),
+                text: Some("world".into()),
+                extra: Map::new(),
+            },
+        ]);
+        assert_eq!(parts.joined_text().as_deref(), Some("Hello world"));
+        assert_eq!(ResponseContent::Text("".into()).joined_text(), None);
+        assert_eq!(
+            ResponseContent::Parts(vec![ResponseContentPart {
+                kind: "image_url".into(),
+                text: None,
+                extra: Map::new(),
+            }])
+            .joined_text(),
+            None
+        );
+        let response: ChatCompletionResponse = nextjson::from_value(json!({
+            "choices":[{"index":0,"message":{"content":[
+                {"type":"text","text":"multi"},
+                {"type":"image_url","image_url":{"url":"x"}}
+            ]}}]
+        }))
+        .unwrap();
+        assert_eq!(response.joined_text().as_deref(), Some("multi"));
+        assert_eq!(response.text(), None);
+    }
+
+    #[test]
     fn thinking_constructors_match_wire_values() {
         assert_eq!(
             nextjson::to_value(&Thinking::enabled()).unwrap()["type"].as_str(),
@@ -1786,5 +2021,73 @@ mod tests {
             .mime_type("application/jsonl");
         assert_eq!(file.file_name, "input.jsonl");
         assert_eq!(file.mime_type.as_deref(), Some("application/jsonl"));
+    }
+
+    #[test]
+    fn moderation_request_matches_official_wire_shapes() {
+        let text = ModerationRequest::new_text("content to review");
+        let value = nextjson::to_value(&text).unwrap();
+        assert_eq!(value["model"].as_str(), Some("moderation"));
+        assert_eq!(value["input"].as_str(), Some("content to review"));
+
+        let item =
+            ModerationRequest::new_item(ModerationItem::image_url("https://example.com/a.png"));
+        let value = nextjson::to_value(&item).unwrap();
+        assert_eq!(value["input"]["type"].as_str(), Some("image_url"));
+        assert_eq!(
+            value["input"]["image_url"]["url"].as_str(),
+            Some("https://example.com/a.png")
+        );
+
+        let batch = ModerationRequest::new_items([
+            ModerationItem::text("first"),
+            ModerationItem::audio_url("https://example.com/a.mp3"),
+            ModerationItem::video_url("https://example.com/a.mp4"),
+        ]);
+        let value = nextjson::to_value(&batch).unwrap();
+        assert_eq!(value["input"].as_array().unwrap().len(), 3);
+        assert_eq!(value["input"][1]["type"].as_str(), Some("audio_url"));
+        assert_eq!(value["input"][2]["type"].as_str(), Some("video_url"));
+    }
+
+    #[test]
+    fn moderation_response_decodes_risk_levels() {
+        let response: ModerationResponse = nextjson::from_value(json!({
+            "id":"mod-1",
+            "created":1700000000,
+            "request_id":"req-1",
+            "result_list":[
+                {"content_type":"text","risk_level":"REJECT","risk_type":["violence"]},
+                {"content_type":"image_url","risk_level":"PASS"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(response.id.as_deref(), Some("mod-1"));
+        let results = response.result_list.unwrap();
+        assert_eq!(results[0].risk_level, Some(RiskLevel::Reject));
+        assert_eq!(results[1].risk_level, Some(RiskLevel::Pass));
+        assert_eq!(results[0].risk_type.as_ref().unwrap()[0], "violence");
+        let unknown: ModerationResponse = nextjson::from_value(json!({
+            "result_list":[{"risk_level":"NEW_LEVEL"}]
+        }))
+        .unwrap();
+        assert_eq!(
+            unknown.result_list.unwrap()[0].risk_level,
+            Some(RiskLevel::Unknown)
+        );
+    }
+
+    #[test]
+    fn watermark_and_generation_model_constants_are_consistent() {
+        let request = ChatCompletionRequest::new(GLM_IMAGE_MODEL)
+            .watermark_enabled(true)
+            .message(ChatMessage::user("hi"));
+        assert_eq!(request.watermark_enabled, Some(true));
+        assert_eq!(GLM_IMAGE_MODEL, "glm-image");
+        assert_eq!(COGVIEW_4_MODEL, "cogview-4");
+        assert_eq!(COGVIDEOX_3_MODEL, "cogvideox-3");
+        assert_eq!(VIDU_2_MODEL, "vidu-2");
+        assert_eq!(MODERATION_MODEL, "moderation");
+        assert_eq!(MODERATION_TEXT_LIMIT, 2_000);
     }
 }

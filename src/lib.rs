@@ -11,6 +11,7 @@ mod provider;
 mod rag;
 #[cfg(feature = "realtime")]
 mod realtime;
+mod security;
 mod sse;
 #[cfg(feature = "tools")]
 mod tool_stream;

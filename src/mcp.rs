@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use nextjson::Map;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -14,6 +15,7 @@ use rmcp::transport::common::client_side_sse::NeverRetry;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{Peer, RoleClient, ServiceExt};
 
+use crate::security::validate_http_url;
 use crate::{McpClientError, Result};
 
 pub type McpToolDefinition = Tool;
@@ -31,10 +33,16 @@ pub struct McpClientConfig {
     pub headers: HeaderMap,
     pub http_client: Option<reqwest::Client>,
     pub reinitialize_expired_session: bool,
+    pub allow_insecure: bool,
 }
 
 impl fmt::Debug for McpClientConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let header_names = self
+            .headers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
         formatter
             .debug_struct("McpClientConfig")
             .field("endpoint", &self.endpoint)
@@ -42,7 +50,7 @@ impl fmt::Debug for McpClientConfig {
                 "bearer_token",
                 &self.bearer_token.as_ref().map(|_| "[REDACTED]"),
             )
-            .field("headers", &self.headers)
+            .field("headers", &header_names)
             .field(
                 "http_client",
                 &self.http_client.as_ref().map(|_| "configured"),
@@ -51,6 +59,7 @@ impl fmt::Debug for McpClientConfig {
                 "reinitialize_expired_session",
                 &self.reinitialize_expired_session,
             )
+            .field("allow_insecure", &self.allow_insecure)
             .finish()
     }
 }
@@ -63,6 +72,7 @@ impl McpClientConfig {
             headers: HeaderMap::new(),
             http_client: None,
             reinitialize_expired_session: false,
+            allow_insecure: false,
         }
     }
 
@@ -95,6 +105,11 @@ impl McpClientConfig {
         self
     }
 
+    pub fn allow_insecure(mut self, value: bool) -> Self {
+        self.allow_insecure = value;
+        self
+    }
+
     pub async fn connect(self) -> Result<McpClient> {
         McpClient::connect(self).await
     }
@@ -115,7 +130,7 @@ impl fmt::Debug for McpClient {
 
 impl McpClient {
     pub async fn connect(config: McpClientConfig) -> Result<Self> {
-        validate_endpoint(&config.endpoint)?;
+        validate_endpoint(&config.endpoint, config.allow_insecure)?;
         if config
             .bearer_token
             .as_ref()
@@ -128,6 +143,8 @@ impl McpClient {
             Some(client) => client,
             None => reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(120))
                 .build()
                 .map_err(|error| McpClientError::ClientBuild(error.to_string()))?,
         };
@@ -235,16 +252,9 @@ impl McpClient {
     }
 }
 
-fn validate_endpoint(endpoint: &str) -> Result<()> {
-    let url = reqwest::Url::parse(endpoint)
-        .map_err(|error| McpClientError::InvalidEndpoint(error.to_string()))?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err(McpClientError::InvalidEndpoint(
-            "expected an absolute http or https URL".into(),
-        )
-        .into());
-    }
-    Ok(())
+fn validate_endpoint(endpoint: &str, allow_insecure: bool) -> Result<()> {
+    validate_http_url(endpoint, allow_insecure)
+        .map_err(|error| McpClientError::InvalidEndpoint(error.to_string()).into())
 }
 
 /// Converts a nextjson map into the `serde_json` map required by the rmcp wire
@@ -315,13 +325,17 @@ mod tests {
     #[test]
     fn rejects_non_http_transport_urls_before_network_io() {
         for endpoint in ["file:///tmp/mcp.sock", "relative", "ftp://example.com/mcp"] {
-            let error = validate_endpoint(endpoint).unwrap_err();
+            let error = validate_endpoint(endpoint, false).unwrap_err();
             assert!(matches!(
                 error,
                 crate::SdkError::Mcp(McpClientError::InvalidEndpoint(_))
             ));
         }
-        assert!(validate_endpoint("http://localhost:8080/mcp").is_ok());
+        assert!(validate_endpoint("http://localhost:8080/mcp", false).is_ok());
+        assert!(validate_endpoint("https://mcp.example.com/mcp", false).is_ok());
+        assert!(validate_endpoint("http://mcp.example.com/mcp", false).is_err());
+        assert!(validate_endpoint("http://mcp.example.com/mcp", true).is_ok());
+        assert!(validate_endpoint("https://user:pass@example.com/mcp", false).is_err());
     }
 
     #[tokio::test]

@@ -8,21 +8,17 @@
 [![Documentation](https://docs.rs/rustglm/badge.svg)](https://docs.rs/rustglm)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-RustGLM 是面向智谱 AI 开放平台的非官方异步 Rust SDK，提供强类型 GLM-5 请求、SSE 和 ToolStream 聚合、双向 Realtime WebSocket 会话、Batch API 操作、知识库管理，以及基于官方 Rust MCP SDK 的 MCP 客户端。
+RustGLM 是面向智谱 AI 开放平台的异步 Rust SDK。除了常规的聊天能力（GLM-5 强类型请求、SSE 流式、ToolStream 聚合），它还覆盖批量任务、知识库、文件解析与 OCR、图像/视频生成、语音、双向 Realtime WebSocket、带语义记忆的本地 Agent 运行时，以及基于 `rmcp` 的独立 MCP 客户端。
 
-本 crate 面向生产后端。网络策略、持久化、凭据、重试和客户端生命周期均由应用显式控制。
+这个库是给后端服务用的，所以它不会碰你的机器：不发现配置文件、不做隐式磁盘写入、不上报遥测。凭据、重试、持久化、客户端生命周期，全部由你掌控。
 
 ## 快速开始
 
-添加默认 SDK 与 Tokio 运行时：
-
 ```toml
 [dependencies]
-rustglm = "1.0.0"
+rustglm = "1.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
-
-设置凭据并运行补全示例：
 
 ```powershell
 $env:ZHIPU_API_KEY = "key_id.secret"
@@ -44,85 +40,72 @@ println!("{}", response.text().unwrap_or_default());
 
 ## 要求
 
-- Rust 1.88 或更高版本
-- Rust 2024 Edition
-- 用于异步执行的 Tokio
-- 智谱 API Key，或已签发的智谱 Bearer token
+- Rust 1.88 或更高版本（2024 edition）
+- 异步执行需要 Tokio
+- 智谱 API Key，或你已有的 Bearer token
 
-Cargo 包名和 Rust crate 名均为 `rustglm`。
+## 这个库做什么、不做什么
 
-## 副作用约定
+几条底线，避免在生产环境里出现意外：
 
-RustGLM 不会进行隐式磁盘 I/O。
-
-- 库不会创建目录、查找配置文件、写入日志、缓存响应、持久化对话或保存音视频。
-- 文件与 RAG 上传 API 接收调用方拥有的字节数据，内部绝不打开文件路径。
-- 响应、SSE 帧、Realtime 媒体、内存快照和工具事件始终保留在内存或异步流中。
-- 库不会从环境变量读取 API Key；凭据由构造函数传入。`EnvironmentSecretResolver` 是显式启用的 Agent 工具。
-- 库从不访问 NTP、元数据、遥测或模型发现服务；JWT 签名仅使用本机系统时钟。
-- HTTP 默认重试次数为零；MCP SSE 重试和过期会话自动初始化默认关闭。
-- 构造配置值不产生网络 I/O。智谱请求只会在等待端点方法时发出；MCP 或 Realtime 连接只会在等待 `connect` 时建立。
-
-示例可能显式读取环境变量或本地文件。这些属于应用层行为，并非 SDK 执行。
+- 不做隐式磁盘 I/O。文件与 RAG 上传接收调用方持有的字节数据，库本身从不打开路径。
+- 不隐式读取凭据。API Key 是构造参数；`EnvironmentSecretResolver` 是需要显式启用的 Agent 工具，不是魔法。
+- 不产生你没要求的网络流量。构造配置值零 I/O，只有当你 await 端点方法时才会发请求。
+- 不上报遥测、不访问元数据端点、不用 NTP。JWT 签名只读本机时钟。
+- HTTP 重试默认关闭。即便你开启，也只有幂等方法（GET、HEAD、DELETE、OPTIONS、PUT）会在连接/超时失败时自动重试，避免把已经落到服务端的 POST 再打一遍。
+- 凭据只在 TLS 上传输。非本机地址的明文 `http://` 基址默认拒绝，除非 `HttpConfig::allow_insecure(true)` 显式开启——与 MCP、Realtime 的策略一致。
 
 ## Feature flags
 
-默认 feature 保留广泛的智谱 API 能力，同时使独立 MCP 协议客户端保持按需启用。
+默认 feature 覆盖完整的智谱能力面；MCP 客户端因为引入 `rmcp` 而默认不启用。
 
-| Feature | 默认启用 | API 能力 |
+| Feature | 默认启用 | 能力 |
 | --- | ---: | --- |
-| `agents` | 是 | 官方 Agent、Assistant 端点和本地 Agent 运行时 |
-| `audio` | 是 | GLM-4-Voice、转录、语音和音色操作 |
-| `batch` | 是 | 强类型 Batch API 创建、列表、查询和取消 |
-| `files` | 是 | 文件上传、下载、删除、解析、OCR 和版面分析 |
+| `agents` | 是 | 官方 Agent、Assistant 端点、本地 Agent 运行时 |
+| `audio` | 是 | GLM-4-Voice、转录、语音、音色管理 |
+| `batch` | 是 | 强类型 Batch API：创建、列表、查询、取消 |
+| `files` | 是 | 文件上传/下载/删除、解析、OCR、版面分析 |
 | `images` | 是 | 图像生成 |
-| `mcp` | 否 | 基于 `rmcp` 的独立 Streamable HTTP MCP 客户端 |
+| `mcp` | 否 | 独立 Streamable HTTP MCP 客户端（`rmcp`） |
 | `rag` | 是 | Retrieval Agent、知识库与文档管理 |
 | `realtime` | 是 | 强类型双向 WebSocket 客户端 |
-| `tools` | 是 | 托管工具类型、Web 操作和 ToolStream 聚合 |
+| `tools` | 是 | 托管工具类型、Web 操作、ToolStream 聚合 |
 | `video` | 是 | 视频生成 |
-| `full` | 否 | 启用包括 `mcp` 在内的全部 feature |
+| `full` | 否 | 全部启用，包括 `mcp` |
 
-最小 HTTP 聊天客户端：
+最小聊天构建：
 
 ```toml
 [dependencies]
-rustglm = { version = "1.0.0", default-features = false }
+rustglm = { version = "1.0", default-features = false }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-选择部分企业 API：
+需要更多时按需选取：
 
 ```toml
 [dependencies]
 rustglm = {
-    version = "1.0.0",
+    version = "1.0",
     default-features = false,
     features = ["batch", "mcp", "rag", "realtime", "tools"]
 }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-全部 API：
-
-```toml
-[dependencies]
-rustglm = { version = "1.0.0", features = ["full"] }
-```
-
 ## 认证
 
-`ZhipuClient::new`、`ZhipuConfig::new` 和 `RealtimeConfig::new` 均直接接收凭据。
+`ZhipuClient::new`、`ZhipuConfig::new` 和 `RealtimeConfig::new` 都直接接收凭据。
 
-- `key_id.secret` 被视为智谱组合 API Key，并签名为 HS256 JWT。
-- 任何其他非空值均被视为不透明 Bearer token。
-- 自动选择不合适时，可使用 `ZhipuAuthentication::jwt` 或 `ZhipuAuthentication::bearer`。
+- `key_id.secret` 视为组合 API Key，签名为 HS256 JWT（带缓存，过期前自动刷新）。
+- 其他任何非空值视为不透明 Bearer token。
+- 需要显式指定时用 `ZhipuAuthentication::jwt` 或 `ZhipuAuthentication::bearer`。
 
-请勿提交凭据。应用应自行从进程环境、密钥管理器或工作负载身份提供方读取密钥。
+不要提交凭据。从环境变量、密钥管理器或工作负载身份提供方读取，这部分由你负责。
 
 ## 强类型 GLM-5 聊天
 
-标记类型、封闭能力 trait 和请求 typestate 会阻止通过强类型 API 发送不支持的操作。请求在包含用户或工具输入前，无法传给强类型补全方法。
+标记类型与封闭能力 trait 让强类型 API 在编译期就拒绝不支持的字段。你没法给不支持推理强度的模型发 `reasoning_effort`，请求在包含用户或工具输入之前也无法触达网络。
 
 ```rust,no_run
 use rustglm::{Glm53, ReasoningEffort, Thinking, TypedChatRequest, ZhipuClient};
@@ -140,9 +123,7 @@ println!("{}", response.text().unwrap_or_default());
 # }
 ```
 
-### 支持的聊天模型
-
-下表描述编译期强类型 API。新发布或私有模型 ID 仍可通过原始 `ChatCompletionRequest` 使用。
+支持的标记类型见下表。不在表里的模型（新发布、私有部署）直接用 `ChatCompletionRequest` 传模型 ID 字符串即可。
 
 | 文本模型 | 标记类型 | Thinking | Reasoning effort | ToolStream |
 | --- | --- | :---: | :---: | :---: |
@@ -161,6 +142,9 @@ println!("{}", response.text().unwrap_or_default());
 | `glm-4.5-flash` | `Glm45Flash` | 是 | 否 | 否 |
 | `glm-4-flash-250414` | `Glm4Flash250414` | 否 | 否 | 否 |
 | `glm-4-flashx-250414` | `Glm4FlashX250414` | 否 | 否 | 否 |
+| `glm-4-long` | `Glm4Long` | 否 | 否 | 否 |
+| `charglm-4` | `Charglm4` | 否 | 否 | 否 |
+| `emohaa` | `Emohaa` | 否 | 否 | 否 |
 
 | 视觉模型 | 标记类型 | Thinking | ToolStream |
 | --- | --- | :---: | :---: |
@@ -172,14 +156,14 @@ println!("{}", response.text().unwrap_or_default());
 | `glm-4v-flash` | `Glm4vFlash` | 否 | 否 |
 | `glm-4.1v-thinking-flash` | `Glm41vThinkingFlash` | 是 | 否 |
 | `glm-4.1v-thinking-flashx` | `Glm41vThinkingFlashX` | 是 | 否 |
+| `glm-ocr` | `GlmOcr` | 否 | 否 |
+| `glm-4.1v-thinking` | `Glm41vThinking` | 是 | 否 |
 
-`ReasoningEffort`、`Thinking`、ToolStream、工具和视觉输入只会暴露给声明相应能力的标记类型，从而阻止不受支持的字段通过强类型 API 到达传输层。
-
-当新发布字段尚未获得强类型 builder 时，`ChatCompletionRequest` 仍可作为前向兼容的原始请求使用。
+`ReasoningEffort`、`Thinking`、ToolStream、工具和视觉输入只存在于声明了对应能力的标记类型上，不支持的字段走不到传输层。
 
 ## ToolStream
 
-ToolStream 将碎片化 SSE 函数调用增量合并为完整的强类型调用，同时保留文本、推理、用量和流错误。
+ToolStream 把碎片化的 SSE 函数调用增量合并成完整强类型调用，同时保留文本、推理、用量与流错误。它还有合理上限：单次调用的参数与并发未完成调用数都有界，参数不是合法 JSON 的调用不会被当作"已完成"发出。
 
 ```rust,no_run
 use futures_util::StreamExt;
@@ -193,6 +177,54 @@ while let Some(event) = stream.next().await {
     if let ToolStreamEvent::ToolCallCompleted(call) = event? {
         println!("{} {}", call.name, call.arguments);
     }
+}
+# Ok(())
+# }
+```
+
+## 本地 Agent 运行时
+
+除了官方托管 Agent，还有一个自托管的 `AgentRuntime`：按 manifest 驱动的循环，跑在任意 `ChatProvider` 之上——persona 提示词、历史策略、注册工具、可选语义记忆。这个运行时默认就是可防御的：
+
+- `max_steps` 有上限；工具总执行次数、单次工具输出字节数都有预算。
+- 可选的 `run_timeout` 与 `tool_timeout` 让卡死的模型或挂起的工具不会永远阻塞请求。
+- 召回的记忆以"不可信上下文"注入，明确标注为数据而非指令——限制进入记忆库的注入内容能造成的影响面。
+- 错误是结构化的（`StepLimit`、`BudgetExceeded`、`NoOutput`、`ToolError::NotRegistered` 等），可以直接分支处理，不用字符串匹配。
+
+```rust,no_run
+use std::sync::Arc;
+use rustglm::{AgentManifest, AgentPersona, AgentRuntime, ZhipuClient};
+
+# async fn run() -> rustglm::Result<()> {
+let client = Arc::new(ZhipuClient::new("token")?);
+let manifest = AgentManifest::new(
+    "glm-5.3",
+    AgentPersona::new("Lin", "technical companion").language("English"),
+);
+let mut agent = AgentRuntime::new(client, manifest)?;
+let result = agent.run("What is the status?").await?;
+# let _ = result;
+# Ok(())
+# }
+```
+
+## 内容安全
+
+`moderate_content` 把强类型的文本、图片、音频或视频内容发给内容安全模型，返回结构化风险结果。文本输入上限 2000 字符；媒体 URL 必须是绝对 HTTP(S) 地址，在发出任何请求前校验。
+
+```rust,no_run
+use rustglm::{ModerationItem, ModerationRequest, ZhipuClient};
+
+# async fn run() -> rustglm::Result<()> {
+let client = ZhipuClient::new("token")?;
+let response = client
+    .moderate_content(&ModerationRequest::new_items([
+        ModerationItem::text("Check this comment"),
+        ModerationItem::image_url("https://example.com/upload.png"),
+    ]))
+    .await?;
+for result in response.result_list.unwrap_or_default() {
+    println!("{:?} -> {:?}", result.content_type, result.risk_level);
 }
 # Ok(())
 # }
@@ -215,11 +247,11 @@ println!("{:?}", current.status);
 # }
 ```
 
-可用方法为 `create_batch`、`batches`、`batch` 和 `cancel_batch`。不在 `1..=100` 范围内的列表限制会在网络 I/O 前返回 `BatchError::InvalidLimit`。
+可用方法为 `create_batch`、`batches`、`batch` 和 `cancel_batch`。不在 `1..=100` 范围内的列表限制会在任何网络 I/O 之前返回 `BatchError::InvalidLimit`。
 
 ## 知识库与 RAG
 
-`rag` feature 遵循官方知识库 OpenAPI 路径，涵盖知识库 CRUD、容量、检索、文档列表和详情、内存文件上传、URL 摄取、删除、文档图片和重新嵌入。`RagDocumentUpload::from_bytes` 有意不提供基于路径的构造函数；调用方控制文件读取、大小限制、加密、租户边界和保留策略。
+`rag` feature 遵循官方知识库 OpenAPI 路径：知识库 CRUD、容量、检索、文档列表/详情、内存文件上传、URL 摄取、删除、文档图片与重新嵌入。上传和回调 URL 在发出前都会校验——必须是带主机的绝对 HTTP(S) URL，且不允许内嵌凭据。
 
 ```rust,no_run
 use rustglm::{KnowledgeCreateRequest, KnowledgeEmbeddingModel, ZhipuClient};
@@ -234,9 +266,11 @@ println!("{}", created.data.expect("successful response").id);
 # }
 ```
 
+`RagDocumentUpload::from_bytes` 不提供基于路径的构造函数是有意为之：文件读取、大小限制、加密、租户边界与保留策略都留在你手里。
+
 ## MCP 客户端
 
-`mcp` feature 是独立的 Model Context Protocol 客户端，与在模型请求中配置托管 MCP 工具的 `McpTool` 不同。协议帧、初始化、工具、资源、提示词和 Streamable HTTP 传输由官方 Rust MCP SDK（`rmcp`）提供。
+`mcp` feature 是独立的 Model Context Protocol 客户端（与在模型请求里配置托管 MCP 工具的 `McpTool` 不同）。协议帧、初始化、工具、资源、提示词和 Streamable HTTP 传输来自官方 `rmcp` crate。
 
 ```rust,no_run
 use rustglm::McpClientConfig;
@@ -250,11 +284,18 @@ client.close().await?;
 # }
 ```
 
-安全默认值：仅接受绝对 `http` 和 `https` 端点；授权显式配置并从 `Debug` 输出中脱敏；SDK 创建的 HTTP 客户端禁用重定向；SSE 重试和过期会话自动初始化默认关闭；可注入调用方配置的 `reqwest::Client` 控制代理、TLS、DNS、超时和策略。
+值得知道的安全默认值：
+
+- 只接受绝对 HTTP(S) 端点。非本机地址的明文 `http://` 默认拒绝，除非显式 `allow_insecure(true)`。
+- 内嵌凭据的 URL 直接拒绝。
+- `Debug` 输出脱敏 Bearer token，headers 只打印名字、不打印值。
+- 禁用重定向，SDK 创建的客户端带连接/请求超时。
+- SSE 重试和过期会话自动初始化默认关闭。
+- 可以注入自己的 `reqwest::Client` 控制代理、TLS、DNS 或策略。
 
 ## Realtime WebSocket
 
-`realtime` feature 通过双向 WebSocket 提供强类型客户端请求和服务器事件。音视频作为调用方拥有的字节切片传入，并在内存中编码。
+`realtime` feature 是强类型双向 WebSocket 客户端。音视频以调用方持有的字节切片传入，在内存中编码。
 
 ```rust,no_run
 use rustglm::{RealtimeConfig, RealtimeRequest, TypedRealtimeSession};
@@ -271,11 +312,18 @@ while let Some(event) = connection.next_typed_event().await {
 # }
 ```
 
-该 API 还支持强类型会话工具、函数调用输出、响应选项、转录会话、客户端/服务端 VAD、取消、音频提交/清空、视频帧和显式关闭连接。
+传输层的加固：
+
+- 默认端点是 `wss://`。明文 `ws://` 默认拒绝，除非显式 `allow_insecure(true)`。
+- 消息与帧大小限制在 WebSocket 层强制执行。
+- 事件循环不会阻塞在已满的出站通道上——消费慢就丢事件，而不是把连接、心跳和关闭全部卡死。
+- 写入有时间上限，`close()` 等待后台任务最多几秒。
+
+该客户端还支持强类型会话工具、函数调用输出、响应选项、转录会话、客户端/服务端 VAD、取消、音频提交/清空、视频帧与显式关闭。
 
 ## 错误
 
-`SdkError` 是公共错误封装。领域错误是显式枚举，可直接匹配，无需解析展示字符串。
+`SdkError` 是唯一的公共错误类型。领域错误保持为显式枚举，可以直接匹配，不用解析字符串。
 
 ```rust
 use rustglm::{BatchError, SdkError};
@@ -284,22 +332,27 @@ fn classify(error: SdkError) {
     match error {
         SdkError::Batch(BatchError::InvalidLimit(limit)) => eprintln!("invalid batch limit: {limit}"),
         SdkError::Api(api) => eprintln!("HTTP {} request_id={:?}", api.status, api.request_id),
+        SdkError::PayloadTooLarge { limit, .. } => eprintln!("response exceeded {limit} bytes"),
         other => eprintln!("{other}"),
     }
 }
 ```
 
-该封装区分配置、校验、传输、超时、API、解码、流、WebSocket、不支持能力、Agent、工具、Batch、RAG 和 MCP 失败。`ApiError` 保留 HTTP 状态、厂商代码、消息、请求 ID 和原始响应体。
+封装区分配置、校验、传输、超时、API、解码、流、WebSocket、不支持能力、Agent、工具、Batch、RAG 和 MCP 失败。`ApiError` 保留 HTTP 状态、厂商代码、消息与请求 ID，也保留原始响应体——调试很有用，但响应体可能包含模型输出等敏感数据，记录前请三思。
 
 ## HTTP 策略
 
-`HttpConfig` 控制请求超时、连接超时、连接池空闲超时、user agent、默认请求头、重试策略，以及可选的调用方构建 `reqwest::Client`。
+`HttpConfig` 控制请求超时、连接超时、连接池空闲超时、响应体大小上限、user agent、默认请求头、重试策略，以及可选的调用方构建 `reqwest::Client`。
 
-重试默认关闭。启用 `RetryPolicy` 是应用的显式决定；只有配置的状态码及连接/超时失败会被重试。
+- 重试默认关闭；即便开启，也只重试你配置的状态码，且连接/超时重试仅对幂等方法生效。
+- 响应体按上限读取（`max_response_bytes`，默认 64 MiB），防止异常或恶意的端点撑爆进程内存。错误响应体另有 64 KiB 独立上限。同样的思路也用于 SSE 事件（单事件 16 MiB、单事件最多 4096 行 data）和流式工具参数（单调用 1 MiB）。
+- 非本机地址的基址必须是 HTTPS。明文 `http://` 只允许回环与私网地址（本地测试、内网代理），其余地址需要 `allow_insecure(true)`。
+- JWT 令牌缓存使用单调时钟，系统时间回拨不会延长已过期令牌的使用寿命。
+- 进入 `ApiError` 的错误体先经过脱敏：智谱 `id.secret` 格式的 Key、Bearer token、以及配置的凭据本身都会替换为 `[FILTERED]`，避免密钥通过日志外泄。
 
 ## API 覆盖范围
 
-下表是公开 SDK 操作的索引，依据公开客户端接口整理，而非假定服务商能力。接受 `nextjson::Value` 的方法有意保留与快速变化的服务商 Schema 的兼容性。
+公开能力速查。接受 `nextjson::Value` 的方法是有意为之——服务商 Schema 演化比这个 crate 发版快。
 
 | 能力领域 | Feature | 公开方法 |
 | --- | --- | --- |
@@ -307,7 +360,7 @@ fn classify(error: SdkError) {
 | 异步与向量 API | 核心 | `async_chat`、`async_result`、`embedding`、`rerank`、`tokenizer` |
 | 图像与视频 | `images`、`video` | `create_image`、`create_image_async`、`create_video` |
 | 音频与音色 | `audio` | `glm_4_voice`、`transcribe`、`speech`、`clone_voice`、`voices`、`delete_voice` |
-| 托管工具 | `tools` | `web_search`、`read_web_page`、`moderate` |
+| 托管工具 | `tools` | `web_search`、`read_web_page`、`moderate`、`moderate_content` |
 | 文件与文档处理 | `files` | `upload_file`、`files`、`file_content`、`delete_file`、`create_file_parse_task`、`file_parse_result`、`parse_file_sync`、`ocr`、`parse_layout` |
 | Batch | `batch` | `create_batch`、`batches`、`batch`、`cancel_batch` |
 | 官方 Agent 与 Assistant | `agents` | `official_agent`、`official_agent_stream`、`official_agent_async_result`、`official_agent_conversation`、`assistant`、`assistants`、`assistant_conversations` |
@@ -316,17 +369,15 @@ fn classify(error: SdkError) {
 | 独立 MCP | `mcp` | `McpClientConfig::connect`，以及由 `rmcp` 提供的强类型工具、资源、提示词和 Streamable HTTP 操作 |
 | Realtime | `realtime` | `RealtimeConfig::connect`、强类型请求/事件、VAD、媒体缓冲、函数调用输出、取消与显式关闭 |
 
-服务商已发布字段尚未获得强类型 builder 时，使用 `ChatCompletionRequest`。只有在配置好的服务商 Base URL 下需要新相对路径时才使用 `request_json`；它会拒绝绝对 URL 与父级路径段。
-
-> RustGLM 则提供服务商无关的本地 Agent 运行时、OpenAI 兼容客户端、通用 `rmcp` 协议客户端和支持视频的 Realtime 会话。
+服务商新字段还没上强类型 builder 时用 `ChatCompletionRequest`。`request_json` 只接受配置 Base URL 下的相对路径——绝对 URL 和 `..` 路径段都会被拒绝。
 
 ## 示例
 
-仓库包含 36 个可运行示例。当前每个 HTTP 端点领域都有聚焦示例；通常一起使用的操作会放进同一个生命周期示例。`cargo check --all-targets --all-features` 可在不联系服务商的情况下编译检查全部示例。
+`examples/` 下有 36 个可运行示例，每个端点领域一个聚焦示例，外加几个把常用操作串起来的生命周期示例。`cargo check --all-targets --all-features` 可以在不联网的情况下编译检查全部示例。
 
 ### 聊天、模型与向量
 
-| 示例 | 演示的公开 API |
+| 示例 | 演示内容 |
 | --- | --- |
 | [`chat_completion`](examples/chat_completion.rs) | `chat_completion` |
 | [`chat_stream`](examples/chat_stream.rs) | `chat_completion_stream` |
@@ -342,7 +393,7 @@ fn classify(error: SdkError) {
 
 ### 媒体、文件与文档处理
 
-| 示例 | 演示的公开 API |
+| 示例 | 演示内容 |
 | --- | --- |
 | [`image_generation`](examples/image_generation.rs) | `create_image`、`create_image_async` |
 | [`video_generation`](examples/video_generation.rs) | `create_video`、异步任务 ID |
@@ -356,7 +407,7 @@ fn classify(error: SdkError) {
 
 ### Batch、托管工具与 RAG
 
-| 示例 | 演示的公开 API |
+| 示例 | 演示内容 |
 | --- | --- |
 | [`web_search`](examples/web_search.rs) | `web_search` |
 | [`hosted_tools`](examples/hosted_tools.rs) | `read_web_page`、`moderate` |
@@ -370,7 +421,7 @@ fn classify(error: SdkError) {
 
 ### Agent、MCP 与 Realtime
 
-| 示例 | 演示的公开 API |
+| 示例 | 演示内容 |
 | --- | --- |
 | [`official_agent`](examples/official_agent.rs) | 强类型官方 Agent v1 调用 |
 | [`official_agent_lifecycle`](examples/official_agent_lifecycle.rs) | Agent 流、异步结果与会话操作 |
@@ -380,33 +431,21 @@ fn classify(error: SdkError) {
 | [`mcp_client`](examples/mcp_client.rs) | MCP 工具、资源、提示词与关闭连接 |
 | [`realtime_audio_video`](examples/realtime_audio_video.rs) | Realtime PCM/WAV、可选 JPEG 帧与强类型事件 |
 
-通过 `cargo run --example <name> -- <参数>` 运行示例。MCP 客户端为按需 feature，请使用 `cargo run --example mcp_client --features mcp -- <endpoint>`。大多数智谱示例需要 `ZHIPU_API_KEY`；`openai_compatible` 使用 `OPENAI_COMPATIBLE_BASE_URL` 与 `OPENAI_COMPATIBLE_API_KEY`。运行示例可能消耗额度、创建远程资源，或删除命令行中明确指定的资源。
+通过 `cargo run --example <name> -- <参数>` 运行示例。MCP 示例需要 feature：`cargo run --example mcp_client --features mcp -- <endpoint>`。大多数智谱示例需要 `ZHIPU_API_KEY`；`openai_compatible` 使用 `OPENAI_COMPATIBLE_BASE_URL` 与 `OPENAI_COMPATIBLE_API_KEY`。运行示例会消耗额度、创建或删除远程资源——别随手拿生产账号跑。
 
 ## CI 与发布
 
-CI 工作流会验证：
+CI 会跑格式化、将警告视为错误的 Clippy、无默认/默认/全部/各企业 feature 构建、测试与 doctest、将警告视为错误的文档构建、从已提交 lockfile 构建包，并在全 feature 构建上强制 90% 行覆盖率，产物含 LCOV 与文本摘要。
 
-- 格式化；
-- 将警告视为错误的 Clippy；
-- 无默认 feature、默认 feature、全部 feature 和单独企业 feature 构建；
-- 测试和 doctest；
-- 将警告视为错误的文档构建；
-- 从已提交 lockfile 构建包；
-- 全 feature 行覆盖率不低于 90%，并上传 LCOV 与文本摘要。
-
-发布工作流会在 `v*` tag 推送时运行。手动运行时，请在 Actions 页面选择要发布的提交或分支，并在 `tag` 输入中填写 `v<Cargo.toml version>`。工作流会检出页面所选版本，不再假定 tag 已经存在；它会拒绝版本不匹配，执行全部发布门禁，构建 `.crate`、写入 `SHA256SUMS`，然后创建缺失的附注 tag。已有 tag 只有在指向本次验证的提交时才会被接受。最后，工作流会在配置 `CARGO_REGISTRY_TOKEN` 时可选发布到 crates.io，并创建或更新 GitHub Release。
-
-发布步骤：
+发布工作流在 `v*` tag 推送时运行，也可以手动触发：在 Actions 页面选一个提交或分支，在 `tag` 输入框填 `v<Cargo.toml version>`。工作流检出所选版本而不是假定 tag 已存在；它会拒绝版本不匹配、跑完所有发布门禁、构建 `.crate`、写入 `SHA256SUMS`、创建缺失的附注 tag（已有 tag 只有指向已验证提交时才接受），最后在配置 `CARGO_REGISTRY_TOKEN` 时可选发布 crates.io 并创建/更新 GitHub Release。
 
 ```bash
-# 请先更新 Cargo.toml 与发布说明；Cargo.toml 当前版本为 1.0.0。
+# 先更新 Cargo.toml 版本号，然后：
 git tag -s v1.0.0 -m "RustGLM v1.0.0"
 git push origin v1.0.0
 ```
 
-也可以在 `main` 分支上手动运行 `Release` 工作流，并将 `tag` 填为 `v1.0.0`，无需预先创建 tag。tag 使用普通的 `v1.0.0` 格式，而不是 `RustGLM v1.0.0`。
-
-仓库中不保存 API Key 或 registry token。仅在需要发布 crates.io 时，将 `CARGO_REGISTRY_TOKEN` 配置为 GitHub Actions secret。
+仓库里不保存 API Key 或 registry token。`CARGO_REGISTRY_TOKEN` 只应该以 GitHub Actions secret 的形式存在。
 
 ## 测试与覆盖率
 
@@ -420,30 +459,20 @@ RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
 cargo package --locked
 ```
 
-仓库提供统一覆盖率命令，并由 CI 强制执行最低门槛：
+CI 强制 90% 行覆盖率，每次运行都会发布 LCOV 与文本摘要产物。本地复现：
 
 ```bash
 cargo coverage       # 输出摘要并检查 90% 行覆盖率门槛
 cargo coverage-lcov  # 生成 target/rustglm-lcov.info，并检查相同门槛
 ```
 
-最近一次工作区实测快照（2026-07-24）：
-
-| 测试 | Regions | Functions | Lines | 行覆盖率门槛 |
-| ---: | ---: | ---: | ---: | ---: |
-| 94 个通过、2 个真实服务测试忽略 | 92.72% | 88.33% | 94.02% | 90.00% |
-
-全 feature 测量包含所有库模块，包括可选的 MCP 与 Realtime。知识库/RAG 行覆盖率为 96.63%；成功的 MCP 协议操作需要已初始化的对端，因此其离线行覆盖率为 51.60%。完整模块表、指标解释与 HTML 报告命令见 [docs/COVERAGE.md](docs/COVERAGE.md)。
-
-覆盖率命令会运行离线单元测试与集成测试，并编译全部 36 个示例，但不会执行示例的 `main` 函数，也不会运行被忽略的真实服务测试。请显式运行需要凭据的检查：
+各模块完整数据见 [docs/COVERAGE.md](docs/COVERAGE.md)——判断某个提交的覆盖率请以 CI 产物为准，别拿过期的快照当结论。2 个真实服务测试（`live_zhipu`、`live_realtime`）默认忽略，需要真实 Key 时再显式运行：
 
 ```powershell
 $env:ZHIPU_API_KEY = "key_id.secret"
 cargo test --test live_zhipu -- --ignored --nocapture
 cargo test --test live_realtime -- --ignored --nocapture
 ```
-
-CI 会重新生成数据，并将 `lcov.info` 与 `coverage-summary.txt` 发布为构建产物；评估具体提交时应以该产物为准，不应把上面的快照视为永久承诺。
 
 ## 许可证
 
